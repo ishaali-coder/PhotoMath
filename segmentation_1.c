@@ -1,8 +1,11 @@
 #include "address_map.h"
+#include <stdio.h>
+
 #define IMAGE_WIDTH 320
 #define IMAGE_HEIGHT 240
 #define MAX_SYMBOLS 10
-#define NORM_SIZE 20
+#define NORM_SIZE 28
+#define Y_START 11
 
 typedef struct {
   int x_min, x_max;
@@ -22,6 +25,7 @@ void plot_pixel(int x, int y, short color);
 void clear_screen();
 void display_symbol(short* symbol);
 void delay();
+int find_edge(short* image);
 
 int main(void) {
   // pointers to video-in dma controller
@@ -47,11 +51,17 @@ int main(void) {
     if (edge_capture & 0x1) {  // check if key0 was pressed and released
       *(KEY_ptr + 3) = 0x1;  // clearedge capture bit by writing 1 to first bit
       *(video_in_dma + 3) = 0x0;  // takes a pic (enable goes from 1--> 0)
-      
-      short image[IMAGE_WIDTH * IMAGE_HEIGHT];
+
+
       BoundingBox boxes[MAX_SYMBOLS];
+     
+
+      short image[IMAGE_WIDTH * IMAGE_HEIGHT];
+		
+  
+
       int num_symbols = otsu_algorithm(image, boxes);
-      // now show cropped pieces
+      //now show cropped pieces
       for (int i = 0; i < num_symbols; i++) {
         normalize_symbol(image, boxes[i], symbols[i]);
         display_cropped_symbol(image, boxes[i]);
@@ -64,16 +74,41 @@ int main(void) {
   return 0;
 }
 
+
+int find_edge(short* image) {
+    for (int x = 0; x < IMAGE_WIDTH; x++) {
+        for (int y = Y_START; y < IMAGE_HEIGHT; y++) {
+            if (image[y * IMAGE_WIDTH + x] != 0x0000) {
+                return x;
+            }
+        }
+    }
+    return 0;  // fallback
+}
+
 int otsu_algorithm(short* image, BoundingBox* boxes) {                     // returns number of symbols found
   int total = IMAGE_HEIGHT * IMAGE_WIDTH;  // number of pixels
   //capture image
+  // for (int y = 0; y < IMAGE_HEIGHT; y++) {
+  //   for (int x = 0; x < IMAGE_WIDTH; x++) {
+  //     // want to transfer data from backbuffer to array
+  //     short pixel = *(pixel_buf_address + (y << 9) + (x));  // transfe over pixels
+  //     image[y * IMAGE_WIDTH + x] = pixel;
+  //   }
+  // }
+
+  // fill entire array first
   for (int y = 0; y < IMAGE_HEIGHT; y++) {
     for (int x = 0; x < IMAGE_WIDTH; x++) {
-      // want to transfer data from backbuffer to array
-      short pixel = *(pixel_buf_address + (y << 9) + (x));  // transfe over pixels
-      image[y * IMAGE_WIDTH + x] = pixel;
+        if (y < Y_START || x == 0 || x == IMAGE_WIDTH-1 || y == IMAGE_HEIGHT-1) {
+            image[y * IMAGE_WIDTH + x] = 0xFFFF;  // force band to white so it can be used as background
+        } else {
+            image[y * IMAGE_WIDTH + x] = *(pixel_buf_address + (y << 9) + x);
+    
+        }
     }
   }
+
   // colour histogram
   int colour_histogram[256] = {0};
   //grayscale
@@ -124,20 +159,25 @@ int otsu_algorithm(short* image, BoundingBox* boxes) {                     // re
       otsu_threshold = t;
     }
   }
-  //binary image
+  //B&W image
   for (int i = 0; i < total; i++) {
+  
     image[i] = (image[i] <= otsu_threshold) ? 0x0000 : 0xFFFF;
   }
   //Display black & white image
   for (int y = 0; y < IMAGE_HEIGHT; y++) {
     for (int x = 0; x < IMAGE_WIDTH; x++) {
-      *(pixel_buf_address + (y << 9) + x) = image[y * IMAGE_WIDTH + x];
+
+      if (x == 0 || y < Y_START || y == 239 || x == 319) {
+        *(pixel_buf_address + (y << 9) + x) = 0xFFFF;
+      } else {
+        *(pixel_buf_address + (y << 9) + x) = image[y * IMAGE_WIDTH + x];
+      }
     }
   }
   delay(); 
   //segmentation
-  int num_symbols = segment_symbols(image, boxes);
-  return num_symbols;
+  return segment_symbols(image, boxes);
 }
 
 void median_filter(short int* buffer) {  // removes noise from binary image
@@ -192,7 +232,7 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
   for (int x = 0; x < IMAGE_WIDTH; x++) {
     int has_pixel = 0;  // Will become 1 if we find any BLACK pixel in this column
     // Scan down the column (top to bottom)
-    for (int y = 0; y < IMAGE_HEIGHT; y++) {
+    for (int y = Y_START; y < IMAGE_HEIGHT; y++) {
       // Check if pixel is BLACK (digit = foreground)
       if (image[y * IMAGE_WIDTH + x] == 0x0000) {
         has_pixel = 1;  // This column contains part of a symbol
@@ -211,12 +251,12 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
     else if (!has_pixel && in_symbol) {
       gap_count++;
       if (gap_count >= GAP_THRESHOLD) {
-        boxes[count].x_max = x;    // Mark the RIGHT boundary of the symbol
+        boxes[count].x_max = x - gap_count;    // Mark the RIGHT boundary of the symbol
         int y_min = IMAGE_HEIGHT;  // Initialize top boundary very large
-        int y_max = 0;             // Initialize bottom boundary very small
+        int y_max = Y_START;             // Initialize bottom boundary TO END OF STRIPE
         // Now find TOP and BOTTOM of this symbol
         for (int xx = boxes[count].x_min; xx <= boxes[count].x_max; xx++) {
-          for (int y = 0; y < IMAGE_HEIGHT; y++) {
+          for (int y = Y_START; y < IMAGE_HEIGHT; y++) {
             // Check for BLACK pixels again
             if (image[y * IMAGE_WIDTH + xx] == 0x0000) {
               if (y < y_min) y_min = y;  // Update TOP boundary
@@ -233,7 +273,12 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
         if (count >= MAX_SYMBOLS) break;  // Prevent overflow
       }
     }
-  }
+    // CASE 3: in a symbol and found a pixel
+    else if (has_pixel && in_symbol) {
+        //reset the gap count
+        gap_count = 0;
+    }
+  } 
   //handle symbol that reaches he right edge of the image 
   if (in_symbol && count < MAX_SYMBOLS) {
     boxes[count].x_max = IMAGE_WIDTH - 1;
@@ -242,7 +287,7 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
     int y_max = 0;
 
     for (int xx = boxes[count].x_min; xx <= boxes[count].x_max; xx++) {
-      for (int y = 0; y < IMAGE_HEIGHT; y++) {
+      for (int y = Y_START; y < IMAGE_HEIGHT; y++) {
         if (image[y * IMAGE_WIDTH + xx] == 0x0000) {
           if (y < y_min) y_min = y;
           if (y > y_max) y_max = y;
@@ -276,7 +321,7 @@ void display_cropped_symbol(short* image, BoundingBox box) {
 
 void normalize_symbol(short int* image, BoundingBox box, short* output) {
   /*Takes a detected symbol (bounding box) and rescales it to a fixed size
-  (20x20). This ensures all symbols are uniform for template matching */
+  (28x28). This ensures all symbols are uniform for template matching */
   
   int padding = 3;
 
@@ -353,4 +398,3 @@ void display_symbol(short* symbol) {
 }
 
 void delay() { for (volatile int i = 0; i < 20000000; i++); }
-
