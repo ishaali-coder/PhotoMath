@@ -6,10 +6,11 @@
 #define MAX_SYMBOLS 10
 #define NORM_SIZE 28
 #define Y_START 11
+#define EDGE_IGNORE 10
 
 typedef struct {
-  int x_min, x_max;
-  int y_min, y_max;
+  int x_min, x_max;  //left and right edge
+  int y_min, y_max;  //top and bottom edge
 } BoundingBox;
 
 short symbols[MAX_SYMBOLS][NORM_SIZE * NORM_SIZE];
@@ -25,7 +26,6 @@ void plot_pixel(int x, int y, short color);
 void clear_screen();
 void display_symbol(short* symbol);
 void delay();
-int find_edge(short* image);
 
 int main(void) {
   // pointers to video-in dma controller
@@ -51,14 +51,9 @@ int main(void) {
     if (edge_capture & 0x1) {  // check if key0 was pressed and released
       *(KEY_ptr + 3) = 0x1;  // clearedge capture bit by writing 1 to first bit
       *(video_in_dma + 3) = 0x0;  // takes a pic (enable goes from 1--> 0)
-
-
+      
       BoundingBox boxes[MAX_SYMBOLS];
-     
-
       short image[IMAGE_WIDTH * IMAGE_HEIGHT];
-		
-  
 
       int num_symbols = otsu_algorithm(image, boxes);
       //now show cropped pieces
@@ -74,33 +69,12 @@ int main(void) {
   return 0;
 }
 
-
-int find_edge(short* image) {
-    for (int x = 0; x < IMAGE_WIDTH; x++) {
-        for (int y = Y_START; y < IMAGE_HEIGHT; y++) {
-            if (image[y * IMAGE_WIDTH + x] != 0x0000) {
-                return x;
-            }
-        }
-    }
-    return 0;  // fallback
-}
-
 int otsu_algorithm(short* image, BoundingBox* boxes) {                     // returns number of symbols found
   int total = IMAGE_HEIGHT * IMAGE_WIDTH;  // number of pixels
-  //capture image
-  // for (int y = 0; y < IMAGE_HEIGHT; y++) {
-  //   for (int x = 0; x < IMAGE_WIDTH; x++) {
-  //     // want to transfer data from backbuffer to array
-  //     short pixel = *(pixel_buf_address + (y << 9) + (x));  // transfe over pixels
-  //     image[y * IMAGE_WIDTH + x] = pixel;
-  //   }
-  // }
-
-  // fill entire array first
+  
   for (int y = 0; y < IMAGE_HEIGHT; y++) {
     for (int x = 0; x < IMAGE_WIDTH; x++) {
-        if (y < Y_START || x == 0 || x == IMAGE_WIDTH-1 || y == IMAGE_HEIGHT-1) {
+        if (y < Y_START || x < EDGE_IGNORE || x > IMAGE_WIDTH - EDGE_IGNORE - 1 || y > IMAGE_HEIGHT-1) {
             image[y * IMAGE_WIDTH + x] = 0xFFFF;  // force band to white so it can be used as background
         } else {
             image[y * IMAGE_WIDTH + x] = *(pixel_buf_address + (y << 9) + x);
@@ -193,10 +167,8 @@ void median_filter(short int* buffer) {  // removes noise from binary image
       // Collect 3x3 neighborhood
       for (int dy = -1; dy <= 1; dy++) {
         for (int dx = -1; dx <= 1; dx++) {
-          values[k] = buffer[(y + dy) * IMAGE_WIDTH +
-                             (x + dx)];  // take pixel at (x+dx, y+dy) and store
-                                         // it in array
-          k = k + 1;                     // get surrounding pixels
+          values[k] = buffer[(y + dy) * IMAGE_WIDTH + (x + dx)];  // take pixel at (x+dx, y+dy) and store it in array
+          k = k + 1; // get surrounding pixels
         }
       }
 
@@ -225,11 +197,10 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
   int count = 0;  // Keeps track of how many symbols we have found so far
   int in_symbol = 0;  // Flag: 0 = currently NOT inside a symbol, 1 = inside a symbol
   int gap_count = 0;
-  int last_symbol_end_x = 0;
   int GAP_THRESHOLD = 8;
 
   // Loop through each column of the image (left to right)
-  for (int x = 0; x < IMAGE_WIDTH; x++) {
+  for (int x = EDGE_IGNORE; x < IMAGE_WIDTH - EDGE_IGNORE; x++) {
     int has_pixel = 0;  // Will become 1 if we find any BLACK pixel in this column
     // Scan down the column (top to bottom)
     for (int y = Y_START; y < IMAGE_HEIGHT; y++) {
@@ -303,18 +274,28 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
   return count;  // Return number of symbols detected
 }
 
-void display_cropped_symbol(short* image, BoundingBox box) {
+void display_cropped_symbol(short* image, BoundingBox box) { //function takes binary image and coordinates of one detected symbol
   clear_screen();
 
-  for (int y = box.y_min; y <= box.y_max; y++) {
+  int symbol_width = box.x_max - box.x_min + 1;  //calculates width of symbol; +1 beacuse pixel indices are inclusive 
+  int symbol_height = box.y_max - box.y_min + 1;  //height of symbol
+
+  //Find centre of screen (160, 120)
+  int screen_center_x = IMAGE_WIDTH / 2;
+  int screen_center_y = IMAGE_HEIGHT / 2;
+
+  //compute top left of symbol so its centered
+  int offset_x = screen_center_x - symbol_width / 2;  //left position = centre - half width so midle aligns with screen centre
+  int offset_y = screen_center_y - symbol_height / 2;  
+
+  for (int y = box.y_min; y <= box.y_max; y++) {  //loop thorught symbols vertical and horizontal region
     for (int x = box.x_min; x <= box.x_max; x++) {
-      short pixel = image[y * IMAGE_WIDTH + x];
+      short pixel = image[y * IMAGE_WIDTH + x];  //get pixel value from original image
 
-      // center it on screen
-      int draw_x = x - box.x_min + 100;
-      int draw_y = y - box.y_min + 60;
+      int draw_x = offset_x + (x - box.x_min);  //repositioning pixel
+      int draw_y = offset_y + (y - box.y_min);
 
-      plot_pixel(draw_x, draw_y, pixel);
+      plot_pixel(draw_x, draw_y, pixel); //draw pixel at new position
     }
   }
 }
