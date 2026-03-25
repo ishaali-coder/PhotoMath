@@ -117,10 +117,10 @@ int main(void) {
   while (1) {
     int edge_capture = *(KEY_ptr + 3);
 
-    for (int i = 1; i < TEMPLATES_PER_DIGIT; i += 3) {
-
+    for (int i = 1; i < TEMPLATES_PER_DIGIT; i += 1) {
+        //use key0 to take a picture when u are ready
         while (!(*(KEY_ptr + 3) & 0x1));
-    
+        
         *(KEY_ptr + 3) = 0x1;  // clearedge capture bit by writing 1 to first bit
         *(video_in_dma + 3) = 0x0;  // takes a pic (enable goes from 1--> 0)
 
@@ -129,21 +129,20 @@ int main(void) {
 
         int num_symbols = otsu_algorithm(image, boxes);
 
-        //Now boxes will hold the vertice coordinates of the sample
-        // We need to copy all pixels from (xmin, ymin) --> (xmax, ymax) into our sample array
-
         short normalized[NORM_SIZE * NORM_SIZE];
 
         normalize_symbol(image, boxes[0], normalized);
 
         BoundingBox norm_template = {0, NORM_SIZE -1, 0, NORM_SIZE-1};
-        display_symbol(normalized);
+        display_symbol(normalized); //displays symbol and lets u see it while u decide whther to use or not
 
         delay();    
 
+        //press key1 to CONFIRM this sample or key2 to DISCARD this sample and try again
         while (!(*(KEY_ptr + 3) & 0x2) && !(*(KEY_ptr + 3) & 0x4));
 
 
+        //sample only copied over if key1 is pressed
         for (int j = 0; j < NORM_SIZE* NORM_SIZE && (*(KEY_ptr + 3) & 0x2); j++) {
             template_arr[i].data[j] = (normalized[j] == 0x0000) ? 0 : 1;
             if (j == 0) {
@@ -155,15 +154,13 @@ int main(void) {
             }
         }
         
-        *(KEY_ptr + 3) = 0x11;
+        *(KEY_ptr + 3) = 0x11; //reset all key presses
 
-
-        template_arr[i].label = CURRENT_SYMBOL;
-
+        template_arr[i].label = CURRENT_SYMBOL; //tells us what digit/operator we're currently capturing
 
         *(video_in_dma + 3) = 0x4;  // going back to video mode
     }
-    dump_templates();
+    dump_templates(); // outputs to JTAG terminal
   }
   return 0;
 }
@@ -176,7 +173,8 @@ void capture_template (short* image, BoundingBox box, uint8_t* out) {
     normalize_symbol(image, box, normalized);
 
     for (int i = 0; i < NORM_SIZE* NORM_SIZE; i++) {
-        out[i] = (normalized[i] == 0x0000) ? 0 : 1;
+        out[i] = (normalized[i] == 0x0000) ? 0 : 1; //each sample is cpaturede using only 0 or 1 to save space
+      //using ttype unsigned8 bit integer for least space
     }
 
 }
@@ -546,7 +544,7 @@ void display_symbol(short* symbol) {
 
 void delay() { for (volatile int i = 0; i < 20000000; i++); }
 
-
+//dumps to JTAG terminal using exact format u need to declare in the templates.c file
 void dump_templates() {
 
   for (int i =1 ; i < TEMPLATES_PER_DIGIT; i+=3) {
