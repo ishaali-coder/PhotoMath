@@ -11,9 +11,10 @@
 #define Y_START 11
 #define EDGE_IGNORE 10
 #define TOTAL 320 * 240
-#define TEMPLATES_PER_DIGIT 5
-#define CURRENT_SYMBOL "1"
-
+#define TEMPLATES_PER_DIGIT 10
+#define CURRENT_SYMBOL "x"
+#define SYM_START_I 17
+#define SYM_END_I 20
 //symbol box definition
 typedef struct {
   int x_min, x_max;  // left and right edge
@@ -37,42 +38,6 @@ void delay();
 void dump_templates();
 //float jaccard_similarity(short* image, const Template* template);
 
-// 7-segment encoding for digits 0-9
-// Segments: bit 0=a, 1=b, 2=c, 3=d, 4=e, 5=f, 6=g (0 = ON, 1 = OFF for common anode)
-const unsigned char seven_seg[10] = {
-    0x3F, // 0: segments a,b,c,d,e,f ON
-    0x06, // 1: segments b,c ON
-    0x5B, // 2: segments a,b,d,e,g ON
-    0x4F, // 3: segments a,b,c,d,g ON
-    0x66, // 4: segments b,c,f,g ON
-    0x6D, // 5: segments a,c,d,f,g ON
-    0x7D, // 6: segments a,c,d,e,f,g ON
-    0x07, // 7: segments a,b,c ON
-    0x7F, // 8: all segments ON
-    0x6F  // 9: segments a,b,c,d,f,g ON
-};
-
-void display_int_on_hex(int value) {
-    volatile int* HEX0 = (int*)HEX3_HEX0_BASE;       // HEX0 is bits 7:0
-    volatile int* HEX2 = (int*)HEX5_HEX4_BASE;       // HEX2 is at separate base
-
-    // clamp to valid range
-    if (value < 0)   value = 0;
-    if (value > 239) value = 239;
-
-    int hundreds = value / 100;         // 0 or 1 or 2
-    int tens     = (value / 10) % 10;
-    int ones     = value % 10;
-
-    // HEX3_HEX0_BASE controls HEX3(bits31:24) HEX2(bits23:16) HEX1(bits15:8) HEX0(bits7:0)
-    int current = *HEX0;
-    current &= 0xFF000000;  // preserve HEX3, clear HEX2/HEX1/HEX0
-    current |= (seven_seg[hundreds] << 16);  // HEX2
-    current |= (seven_seg[tens]     <<  8);  // HEX1
-    current |= (seven_seg[ones]          );  // HEX0
-    *HEX0 = current;
-}
-
 
 int main(void) {
   // pointers to video-in dma controller
@@ -95,13 +60,14 @@ int main(void) {
   // enable the video dma controller (set en bit), EN = 1
   //  cntrol register is at 0xFF20306C (offset 3 from VIDEO_IN_BASE)
   *(video_in_dma + 3) = 0x4;
-  *pixel_buf_ctrl = 1;  // wriitng 1 to Buffer register triggers display - enable VGA output
+  *pixel_buf_ctrl =
+      1;  // wriitng 1 to Buffer register triggers display - enable VGA output
 
   
   // //loop to display captured samples
   // *(video_in_dma + 3) = 0x0;
   //   clear_screen();
-  // for (int i = 0; i < TEMPLATES_PER_DIGIT; i++) {
+  // for (int i = SYM_START_I; i < SYM_END_I + 1; i++) {
   //   short normalized[NORM_SIZE* NORM_SIZE];
   //   for (int j = 0; j < NORM_SIZE * NORM_SIZE; j++) {
 
@@ -117,10 +83,10 @@ int main(void) {
   while (1) {
     int edge_capture = *(KEY_ptr + 3);
 
-    for (int i = 0; i < TEMPLATES_PER_DIGIT; i += 1) {
-        //use key0 to take a picture when u are ready
+    for (int i = SYM_START_I; i < SYM_END_I + 1; i += 1) {
+
         while (!(*(KEY_ptr + 3) & 0x1));
-        
+    
         *(KEY_ptr + 3) = 0x1;  // clearedge capture bit by writing 1 to first bit
         *(video_in_dma + 3) = 0x0;  // takes a pic (enable goes from 1--> 0)
 
@@ -129,41 +95,47 @@ int main(void) {
 
         int num_symbols = otsu_algorithm(image, boxes);
 
+        //Now boxes will hold the vertice coordinates of the sample
+        // We need to copy all pixels from (xmin, ymin) --> (xmax, ymax) into our sample array
+
         short normalized[NORM_SIZE * NORM_SIZE];
 
         normalize_symbol(image, boxes[0], normalized);
 
-       // BoundingBox norm_template = {0, NORM_SIZE -1, 0, NORM_SIZE-1};
-        display_symbol(normalized); //displays symbol and lets u see it while u decide whther to use or not
+        BoundingBox norm_template = {0, NORM_SIZE -1, 0, NORM_SIZE-1};
+        display_symbol(normalized);
 
         delay();    
 
-        //press key1 to CONFIRM this sample or key2 to DISCARD this sample and try again
         while (!(*(KEY_ptr + 3) & 0x2) && !(*(KEY_ptr + 3) & 0x4));
 
-
-        //sample only copied over if key1 is pressed
-        for (int j = 0; j < NORM_SIZE* NORM_SIZE && (*(KEY_ptr + 3) & 0x2); j++) {
+        for (int j = 0; (j < NORM_SIZE* NORM_SIZE) && *(KEY_ptr + 3) & 0x2; j++) {
             template_arr[i].data[j] = (normalized[j] == 0x0000) ? 0 : 1;
-            if (j == 0) {
-              for (int y = 0; y < IMAGE_HEIGHT; y++) {
-                for (int x =0; x < IMAGE_WIDTH; x++) {         
-                  plot_pixel(x, y, 0x7832);
-                }
-              }
-            }
         }
         
-        *(KEY_ptr + 3) = 0x11; //reset all key presses
+        *(KEY_ptr + 3) = 0xF;
 
-        template_arr[i].label = CURRENT_SYMBOL; //tells us what digit/operator we're currently capturing
+        template_arr[i].label = CURRENT_SYMBOL;
+
 
         *(video_in_dma + 3) = 0x4;  // going back to video mode
     }
-    dump_templates(); // outputs to JTAG terminal
+    dump_templates();
   }
   return 0;
 }
+
+//worklflow --> when button is pressed
+//capture image
+//no need to run segmentation
+//just greyscale & bnarize thru otsu
+//skip normalization for now
+//try to use display croppped symbol to see what u get
+//have this workflow inside a for loop--> first try to capture just one type of symbol
+
+
+//Lets do 5 "1"" samples
+
 
 
 void capture_template (short* image, BoundingBox box, uint8_t* out) {
@@ -173,8 +145,7 @@ void capture_template (short* image, BoundingBox box, uint8_t* out) {
     normalize_symbol(image, box, normalized);
 
     for (int i = 0; i < NORM_SIZE* NORM_SIZE; i++) {
-        out[i] = (normalized[i] == 0x0000) ? 0 : 1; //each sample is cpaturede using only 0 or 1 to save space
-      //using ttype unsigned8 bit integer for least space
+        out[i] = (normalized[i] == 0x0000) ? 0 : 1;
     }
 
 }
@@ -508,7 +479,7 @@ void plot_pixel(int x, int y, short color) {
 void clear_screen() {
   for (int y = 0; y < IMAGE_HEIGHT; y++) {
     for (int x = 0; x < IMAGE_WIDTH; x++) {
-      plot_pixel(x, y, 0xFFFF);  // white background
+      plot_pixel(x, y, 0x38ab);  // white background
     }
   }
 }
@@ -520,6 +491,9 @@ void display_symbol(short* symbol) {
 
   int scale = 8;  // size of each pixel block
 
+  int x_start = (IMAGE_WIDTH - NORM_SIZE * scale) / 2;
+  int y_start = (IMAGE_HEIGHT - NORM_SIZE * scale) / 2;
+
 
 
   for (int y = 0; y < NORM_SIZE; y++) {
@@ -530,8 +504,8 @@ void display_symbol(short* symbol) {
       // scale each pixel
       for (int dy = 0; dy < scale; dy++) {
         for (int dx = 0; dx < scale; dx++) {
-          int sx = x * scale + 80;  // center X
-          int sy = y * scale + 40;  // center Y
+          int sx = x * scale + x_start;  // center X
+          int sy = y * scale + y_start;  // center Y
 
 
           plot_pixel(sx + dx, sy + dy, pixel);
@@ -542,16 +516,95 @@ void display_symbol(short* symbol) {
 }
 
 
-void delay() { for (volatile int i = 0; i < 20000000; i++); }
+void delay() { for (volatile int i = 0; i < 9000000; i++); }
 
-//dumps to JTAG terminal using exact format u need to declare in the templates.c file
+
+// template matching
+
+
+// SAD -- used in digital image processing
+// similarity betweeen image blocks
+// absolute difference
+// its just the sum of the absoluet value of teh differences between 2 different
+// sumbols has no division so is easy to implement
+
+
+// NCC-- compute the crooss correlation coefficient
+// between intensity values
+// useful for its invariance to linear changes in brightness and contrast
+// robust to variations in illumination and contrast
+//  Sum of (diff between pixel and avg pixel value)sample x (diff between pixel
+//  and avg pixel value)image
+// NCC = sum/(stddev sample x stddev image)
+
+
+// SSD -- used widely in template matching
+// we want to minimize the sum of squared differences between the template and
+// the captured image sensitive to noise optimal in gaussian noise conditions
+//-> when the variation obeys gaussian distribution
+
+
+// Mean squared error
+// sum = (Ptemplate - Pcaptured)^2
+// MSE = sum / numberof pixels (w x h)
+// The lower the MSE the better the match
+// make the sum a float for diviosn
+
+
+// I think i will try jaccard simlarity to account for misalignment
+// union over intersection
+// if
+
+
+// float jaccard_similarity(short* image, const Template* template) {
+//   float union_pixels = 0.0;
+//   float intersection = 0.0;
+
+
+//   for (int i = 0; i < TOTAL; i++) {
+//     short i_pixel = (image[i] == 0x0000);
+//     short t_pixel = (template.data[i] == 0x0000);
+
+
+//     union_pixels += i_pixel | t_pixel;
+//     intersection += i_pixel & t_pixel;
+//   }
+
+
+//   return (union_pixels / intersection);
+// }
+
+
+// int best_template_math(short* image) {
+//   float max_jaccard_similarity = 0.0;
+//   int best_i;
+
+
+//   for (int i = 0; i < NUM_TEMPLATES; i++) {
+//     float similarity = jaccard_similarity(image, template_arr[i]);
+
+
+//     if (similarity > max_jaccard_similarity) {
+//       max_jaccard_similarity = similarity;
+//       best_i = i;
+//     }
+//   }
+
+
+//   return best_i;
+// }
+
+
 void dump_templates() {
 
-  for (int i =1 ; i < TEMPLATES_PER_DIGIT; i+=3) {
-    printf("{ \"%s\", {", template_arr[i].label);
+
+  printf("Start");
+  for (int i = SYM_START_I; i < SYM_END_I + 1; i+=1) {
+    printf(" %d : { \"%s\", {", i, template_arr[i].label);
     for (int j = 0; j < NORM_SIZE * NORM_SIZE; j++) {
       printf("%d,", template_arr[i].data[j]);
     }
     printf("}},\n");
   }
+  printf("Done");
 }
