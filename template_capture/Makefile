@@ -1,8 +1,8 @@
 INSTALL	:= C:/intelFPGA/QUARTUS_Lite_V23.1
 
 MAIN	:= template_capture.c
-SRCS	:= $(MAIN) templates.c
 HDRS	:= templates.h address_map.h
+SRCS	:= $(MAIN) 
 
 
 SHELL	:= cmd.exe
