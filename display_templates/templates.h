@@ -5,7 +5,8 @@
 #include <string.h>
 #include <stdint.h>
 
-#define NUM_TEMPLATES 13
+//5 samples per digit/operator (13) --> need 5 x 13 = 60 templates
+#define NUM_TEMPLATES 60
 
 #define TEMPLATE_BYTES (28 * 28)
 
