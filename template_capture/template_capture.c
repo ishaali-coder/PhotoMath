@@ -117,7 +117,7 @@ int main(void) {
   while (1) {
     int edge_capture = *(KEY_ptr + 3);
 
-    for (int i = 1; i < TEMPLATES_PER_DIGIT; i += 1) {
+    for (int i = 0; i < TEMPLATES_PER_DIGIT; i += 1) {
         //use key0 to take a picture when u are ready
         while (!(*(KEY_ptr + 3) & 0x1));
         
@@ -133,7 +133,7 @@ int main(void) {
 
         normalize_symbol(image, boxes[0], normalized);
 
-        BoundingBox norm_template = {0, NORM_SIZE -1, 0, NORM_SIZE-1};
+       // BoundingBox norm_template = {0, NORM_SIZE -1, 0, NORM_SIZE-1};
         display_symbol(normalized); //displays symbol and lets u see it while u decide whther to use or not
 
         delay();    
