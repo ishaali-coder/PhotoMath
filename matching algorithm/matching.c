@@ -2,6 +2,7 @@
 #include "templates.h"
 
 #include <stdio.h>
+#include <string.h>
 
 //constants
 #define IMAGE_WIDTH 320
@@ -43,6 +44,27 @@ const unsigned char seven_seg[10] = {
 };
 
 
+typedef struct {
+  const char* label;
+  float max_similarity;
+} Symbol;
+
+Symbol symbol_arr[13] = {{"1", 0.0},
+                         {"2", 0.0},
+                         {"3", 0.0},
+                         {"4", 0.0},
+                         {"5", 0.0},
+                         {"6", 0.0},
+                         {"7", 0.0},
+                         {"8", 0.0},
+                         {"9", 0.0},
+                         {"0", 0.0},
+                         {"+", 0.0},
+                         {"-", 0.0},
+                         {"x", 0.0},
+                         {"/", 0.0},
+};
+
 //function declarations
 int otsu_algorithm(short* image, BoundingBox* boxes);
 void median_filter(short int* buffer);
@@ -53,9 +75,11 @@ void plot_pixel(int x, int y, short color);
 void clear_screen();
 void display_symbol(short* symbol);
 void delay();
-float jaccard_similarity(short* image, const Template* template, int i);
+float correlated_similarity(short* image, const Template* template, int i);
 float best_template_match(short* image, int starting_index, int final_index);
 void display_int_on_hex(int value);
+void display_char_on_hex(char c);
+
 
 int main(void) {
   // pointers to video-in dma controller
@@ -111,17 +135,71 @@ int main(void) {
       if (*(KEY_ptr + 3) & 0x2) {
 
         //find highest jacccard similarity with the image and each 1 template
-        float score_1 =  best_template_match(normalized, 0, 5);
-        float score_2 =  best_template_match(normalized, 5, 10);
+        int template_i = 0;
+        float best_score_overall = 0;
+        const char* best_match_so_far;
+
+        for (int i = 0; i < 13; i ++) {
+          float max_score = 0.0;
+  
+
+          const char* label = symbol_arr[i].label;
+
+          while (template_arr[template_i].label ==  label) {
+            float temp_score = correlated_similarity(normalized, template_arr, template_i);
+            
+            if (temp_score > max_score) {
+              max_score = temp_score;
+            }
+
+            template_i++;
+            
+          }
+
+          if (max_score > best_score_overall) {
+            best_score_overall = max_score;
+            best_match_so_far = label;
+          }
+        }
+
+
+
+
+        // float score_1 =  best_template_match(normalized, 0, 5);
+        // float score_2 =  best_template_match(normalized, 5, 10);
 
         //printf("Score 1: %f, Score 2: %f\n", score_1, score_2);
-        if (score_1 > score_2) {
+
+        if (!strcmp(best_match_so_far, "1")) {
             display_int_on_hex(1);
-        } else if (score_2 > score_1) {
+        } else if (!strcmp(best_match_so_far,  "2")) {
             display_int_on_hex(2);
-        } else {
-            display_int_on_hex(-1);
+        } else if (!strcmp(best_match_so_far,  "3")) {
+            display_int_on_hex(3);
+        }  else if (!strcmp(best_match_so_far, "4")) {
+            display_int_on_hex(4);
+        }  else if (!strcmp(best_match_so_far,  "5")) {
+            display_int_on_hex(5);
+        } else if (!strcmp(best_match_so_far, "6")) {
+            display_int_on_hex(6);
+        } else if (!strcmp(best_match_so_far,  "7")) {
+            display_int_on_hex(7);
+        } else if (!strcmp(best_match_so_far, "8")) {
+            display_int_on_hex(8);
+        } else if (!strcmp(best_match_so_far,  "9")) {
+            display_int_on_hex(9);
+        } else if (!strcmp(best_match_so_far, "0")) {
+            display_int_on_hex(0);
+        } else if (!strcmp(best_match_so_far, "+")) {
+            display_char_on_hex('a');
+        } else if (!strcmp(best_match_so_far,  "-")) {
+            display_char_on_hex('S');
+        } else if (!strcmp(best_match_so_far, "x")) {
+            display_char_on_hex('p');
+        }  else if (!strcmp(best_match_so_far, "/")) {
+            display_char_on_hex('d');
         }
+
         delay();    
       } 
 
@@ -549,3 +627,40 @@ void display_int_on_hex(int value) {
     current |= (seven_seg[ones]          );  // HEX0
     *HEX0 = current;
 }
+
+
+//Written by claude.ai
+
+// 7-segment encoding: segments = gfedcba (bit 6 to bit 0)
+// 0 = segment ON, 1 = segment OFF (active low on DE1-SoC)
+
+void display_char_on_hex(char c) {
+    volatile int* HEX_ptr = (int*)HEX3_HEX0_BASE;
+    
+    int segments;
+    
+    switch(c) {
+        case 'p': segments = 0x8C; break;  //  _
+                                           // |_|
+                                           // |
+        case 'S': segments = 0x92; break;  //  _
+                                           // |_
+                                           //  _|
+        case 'a': segments = 0x88; break;  //  _
+                                           // |_|
+                                           // | |
+        case 'd': segments = 0xA1; break;  //
+                                           //  _|
+                                           // |_|
+        default:  segments = 0xFF; break;  // all off
+    }
+    
+    *HEX_ptr = segments;
+}
+
+
+// The 7-segment layout for reference:
+// 
+//  _
+// |_|   segments: a=top, b=top-right, c=bottom-right,
+// |_|            d=bottom, e=bottom-left, f=top-left, g=middle
