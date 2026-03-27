@@ -1,15 +1,15 @@
+#include <stdio.h>
+
 #include "address_map.h"
 #include "templates.h"
 
-#include <stdio.h>
-
-//constants
+// constants
 #define IMAGE_WIDTH 320
 #define IMAGE_HEIGHT 240
 #define MAX_SYMBOLS 1
 #define NORM_SIZE 28
 #define Y_START 11
-#define Y_END 225 
+#define Y_END 225
 #define EDGE_IGNORE 10
 #define MIN_SYMBOL_AREA 100
 #define TOTAL 320 * 240
@@ -18,17 +18,17 @@
 #define SYM_START_I 0
 #define SYM_END_I 40
 
-//symbol box definition
+// symbol box definition
 typedef struct {
   int x_min, x_max;  // left and right edge
   int y_min, y_max;  // top and bottom edge
 } BoundingBox;
 
-//globals
+// globals
 short symbols[MAX_SYMBOLS][NORM_SIZE * NORM_SIZE];
 volatile short int* pixel_buf_address = (short int*)0x08000000;
 
-//function declarations
+// function declarations
 int adaptive_threshold(short* image, BoundingBox* boxes);
 void median_filter(short int* buffer);
 int segment_symbols(short int* image, BoundingBox* boxes);
@@ -39,7 +39,7 @@ void clear_screen();
 void display_symbol(short* symbol);
 void delay();
 void dump_templates();
-//float jaccard_similarity(short* image, const Template* template);
+// float jaccard_similarity(short* image, const Template* template);
 
 int main(void) {
   // pointers to video-in dma controller
@@ -60,81 +60,80 @@ int main(void) {
   *pixel_buf_ctrl =
       1;  // wriitng 1 to Buffer register triggers display - enable VGA output
 
-   //loop to display captured samples
-   *(video_in_dma + 3) = 0x0;
-     clear_screen();
-   for (int i = SYM_START_I; i < SYM_END_I + 1; i++) {
-     short normalized[NORM_SIZE* NORM_SIZE];
-     for (int j = 0; j < NORM_SIZE * NORM_SIZE; j++) {
-
-
-       normalized[j] =  (template_arr[i].data[j] == 0) ? 0x0000 : 0xFFFF;
-     }
-     display_symbol(normalized);
-     delay();
-     clear_screen();
-   }
-   while(1);
+  // loop to display captured samples
+  *(video_in_dma + 3) = 0x0;
+  clear_screen();
+  for (int i = SYM_START_I; i < SYM_END_I + 1; i++) {
+    short normalized[NORM_SIZE * NORM_SIZE];
+    for (int j = 0; j < NORM_SIZE * NORM_SIZE; j++) {
+      normalized[j] = (template_arr[i].data[j] == 0) ? 0x0000 : 0xFFFF;
+    }
+    display_symbol(normalized);
+    delay();
+    clear_screen();
+  }
+  while (1);
 
   while (1) {
     int edge_capture = *(KEY_ptr + 3);
     for (int i = SYM_START_I; i < SYM_END_I + 1; i += 1) {
-        while (!(*(KEY_ptr + 3) & 0x1));
-        *(KEY_ptr + 3) = 0x1;  // clearedge capture bit by writing 1 to first bit
-        *(video_in_dma + 3) = 0x0;  // takes a pic (enable goes from 1--> 0)
+      while (!(*(KEY_ptr + 3) & 0x1));
+      *(KEY_ptr + 3) = 0x1;  // clearedge capture bit by writing 1 to first bit
+      *(video_in_dma + 3) = 0x0;  // takes a pic (enable goes from 1--> 0)
 
-        BoundingBox boxes[MAX_SYMBOLS];
-        short image[TOTAL];
+      BoundingBox boxes[MAX_SYMBOLS];
+      short image[TOTAL];
 
-        int num_symbols = adaptive_threshold(image, boxes);
+      int num_symbols = adaptive_threshold(image, boxes);
 
-        //Now boxes will hold the vertice coordinates of the sample
-        // We need to copy all pixels from (xmin, ymin) --> (xmax, ymax) into our sample array
-        short normalized[NORM_SIZE * NORM_SIZE];
+      // Now boxes will hold the vertice coordinates of the sample
+      //  We need to copy all pixels from (xmin, ymin) --> (xmax, ymax) into our
+      //  sample array
+      short normalized[NORM_SIZE * NORM_SIZE];
 
-        normalize_symbol(image, boxes[0], normalized);
-        BoundingBox norm_template = {0, NORM_SIZE -1, 0, NORM_SIZE-1};
-        display_symbol(normalized);
+      normalize_symbol(image, boxes[0], normalized);
+      BoundingBox norm_template = {0, NORM_SIZE - 1, 0, NORM_SIZE - 1};
+      display_symbol(normalized);
 
-        delay();    
+      delay();
 
-        while (!(*(KEY_ptr + 3) & 0x2) && !(*(KEY_ptr + 3) & 0x4));
+      while (!(*(KEY_ptr + 3) & 0x2) && !(*(KEY_ptr + 3) & 0x4));
 
-        for (int j = 0; (j < NORM_SIZE* NORM_SIZE) && *(KEY_ptr + 3) & 0x2; j++) {
-            template_arr[i].data[j] = (normalized[j] == 0x0000) ? 0 : 1;
-        }
-       
-        *(KEY_ptr + 3) = 0xF;
+      for (int j = 0; (j < NORM_SIZE * NORM_SIZE) && *(KEY_ptr + 3) & 0x2;
+           j++) {
+        template_arr[i].data[j] = (normalized[j] == 0x0000) ? 0 : 1;
+      }
 
-        template_arr[i].label = CURRENT_SYMBOL;
+      *(KEY_ptr + 3) = 0xF;
 
-        *(video_in_dma + 3) = 0x4;  // going back to video mode
+      template_arr[i].label = CURRENT_SYMBOL;
+
+      *(video_in_dma + 3) = 0x4;  // going back to video mode
     }
     dump_templates();
   }
   return 0;
 }
 
-void capture_template (short* image, BoundingBox box, uint8_t* out) {
-    short normalized[NORM_SIZE * NORM_SIZE];
-    normalize_symbol(image, box, normalized);
-    for (int i = 0; i < NORM_SIZE* NORM_SIZE; i++) {
-        out[i] = (normalized[i] == 0x0000) ? 0 : 1;
-    }
-
-
+void capture_template(short* image, BoundingBox box, uint8_t* out) {
+  short normalized[NORM_SIZE * NORM_SIZE];
+  normalize_symbol(image, box, normalized);
+  for (int i = 0; i < NORM_SIZE * NORM_SIZE; i++) {
+    out[i] = (normalized[i] == 0x0000) ? 0 : 1;
+  }
 }
 
-/*Calculates a threshold value for every single pixel based on the pixels in its immediate neighborhood 
-(e.g., a 15x15 block around it).
-If a pixel is darker than its local average, it's considered foreground (black digit).
-If a pixel is brighter than its local average, it's considered background (white board). */
+/*Calculates a threshold value for every single pixel based on the pixels in its
+immediate neighborhood (e.g., a 15x15 block around it). If a pixel is darker
+than its local average, it's considered foreground (black digit). If a pixel is
+brighter than its local average, it's considered background (white board). */
 int adaptive_threshold(short* image, BoundingBox* boxes) {
   int total = IMAGE_HEIGHT * IMAGE_WIDTH;
-  //Grayscale Conversion
+  // Grayscale Conversion
   for (int i = 0; i < total; i++) {
-    short pixel = *(pixel_buf_address + ((i / IMAGE_WIDTH) << 9) + (i % IMAGE_WIDTH));
-    
+    short pixel =
+        *(pixel_buf_address + ((i / IMAGE_WIDTH) << 9) + (i % IMAGE_WIDTH));
+
     int r = (pixel >> 11) & 0x1F;
     int g = (pixel >> 5) & 0x3F;
     int b = pixel & 0x1F;
@@ -144,29 +143,29 @@ int adaptive_threshold(short* image, BoundingBox* boxes) {
     b = (b * 255) / 31;
 
     unsigned char grey = (unsigned char)((77 * r + 150 * g + 29 * b) >> 8);
-    image[i] = (short)grey; // Current grayscale value stored in image array
+    image[i] = (short)grey;  // Current grayscale value stored in image array
   }
 
-  //Apply filter before thresholding
+  // Apply filter before thresholding
   median_filter(image);
 
   // Create a temporary buffer to store the new binary image.
-  static short binary_image[IMAGE_WIDTH * IMAGE_HEIGHT]; 
+  static short binary_image[IMAGE_WIDTH * IMAGE_HEIGHT];
 
-  // define the size of the neighborhood to look at. A 15x15 block 
-  // The 'constant_c' is a small subtraction to make the threshold a little more strict.
-  // This helps to keep small speckles out of the background.
-  int block_size = 15; 
-  int constant_c = 5;  
+  // define the size of the neighborhood to look at. A 15x15 block
+  // The 'constant_c' is a small subtraction to make the threshold a little more
+  // strict. This helps to keep small speckles out of the background.
+  int block_size = 15;
+  int constant_c = 5;
   int half_block = block_size / 2;
 
   for (int y = 0; y < IMAGE_HEIGHT; y++) {
     for (int x = 0; x < IMAGE_WIDTH; x++) {
-      
       long local_sum = 0;
       int count = 0;
 
-      // for each pixel, calculate the average grayscale value of its neighborhood.
+      // for each pixel, calculate the average grayscale value of its
+      // neighborhood.
       for (int dy = -half_block; dy <= half_block; dy++) {
         for (int dx = -half_block; dx <= half_block; dx++) {
           int nx = x + dx;
@@ -180,14 +179,16 @@ int adaptive_threshold(short* image, BoundingBox* boxes) {
       }
 
       int local_avg = local_sum / count;
-      int threshold = local_avg - constant_c; // local threshold for this specific pixel
+      int threshold =
+          local_avg - constant_c;  // local threshold for this specific pixel
 
       // Apply the threshold for this pixel:
-      // If the pixel is darker than its local average (minus the constant), it's part of a digit.
+      // If the pixel is darker than its local average (minus the constant),
+      // it's part of a digit.
       if (image[y * IMAGE_WIDTH + x] <= threshold) {
-        binary_image[y * IMAGE_WIDTH + x] = 0x0000; // Black (digit)
+        binary_image[y * IMAGE_WIDTH + x] = 0x0000;  // Black (digit)
       } else {
-        binary_image[y * IMAGE_WIDTH + x] = 0xFFFF; // White (background)
+        binary_image[y * IMAGE_WIDTH + x] = 0xFFFF;  // White (background)
       }
     }
   }
@@ -197,21 +198,22 @@ int adaptive_threshold(short* image, BoundingBox* boxes) {
     image[i] = binary_image[i];
   }
 
-  //display binary
+  // display binary
   for (int y = 0; y < IMAGE_HEIGHT; y++) {
     for (int x = 0; x < IMAGE_WIDTH; x++) {
-      //edge forcing band logic
-      if (y < Y_START || y > Y_END || x < EDGE_IGNORE || x > IMAGE_WIDTH - EDGE_IGNORE - 1 || y > IMAGE_HEIGHT-1) {
-          image[y * IMAGE_WIDTH + x] = 0xFFFF; // Force it white
-          *(pixel_buf_address + (y << 9) + x) = 0xFFFF;
+      // edge forcing band logic
+      if (y < Y_START || y > Y_END || x < EDGE_IGNORE ||
+          x > IMAGE_WIDTH - EDGE_IGNORE - 1 || y > IMAGE_HEIGHT - 1) {
+        image[y * IMAGE_WIDTH + x] = 0xFFFF;  // Force it white
+        *(pixel_buf_address + (y << 9) + x) = 0xFFFF;
       } else {
-          *(pixel_buf_address + (y << 9) + x) = image[y * IMAGE_WIDTH + x];
+        *(pixel_buf_address + (y << 9) + x) = image[y * IMAGE_WIDTH + x];
       }
     }
   }
 
-  delay(); 
-  return segment_symbols(image, boxes); 
+  delay();
+  return segment_symbols(image, boxes);
 }
 
 void median_filter(short int* buffer) {  // removes noise from binary image
@@ -304,17 +306,18 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
         boxes[count].y_min = y_min;  // Save TOP boundary
         boxes[count].y_max = y_max;  // Save BOTTOM boundary
 
-         //New component logic
+        // New component logic
         int current_width = boxes[count].x_max - boxes[count].x_min + 1;
         int current_height = boxes[count].y_max - boxes[count].y_min + 1;
         int current_area = current_width * current_height;
         if (current_area >= MIN_SYMBOL_AREA) {
-          count++; //It's a real symbol, move to the next box
+          count++;  // It's a real symbol, move to the next box
         } else {
-        //Not a real symbol - noise dot. Do nothing.
-        // The next object will overwrite this index (count) in the boxes array.
+          // Not a real symbol - noise dot. Do nothing.
+          //  The next object will overwrite this index (count) in the boxes
+          //  array.
         }
-        in_symbol = 0;               // We are no longer inside a symbol
+        in_symbol = 0;  // We are no longer inside a symbol
         gap_count = 0;
         if (count >= MAX_SYMBOLS) break;  // Prevent overflow
       }
@@ -347,7 +350,6 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
 
   return count;  // Return number of symbols detected
 }
-
 
 void display_cropped_symbol(
     short* image, BoundingBox box) {  // function takes binary image and
@@ -383,40 +385,39 @@ void display_cropped_symbol(
 }
 
 void normalize_symbol(short int* image, BoundingBox box, short* output) {
-    int padding = 3;
-    int x_min = box.x_min - padding;
-    int x_max = box.x_max + padding;
-    int y_min = box.y_min - padding;
-    int y_max = box.y_max + padding;
+  int padding = 3;
+  int x_min = box.x_min - padding;
+  int x_max = box.x_max + padding;
+  int y_min = box.y_min - padding;
+  int y_max = box.y_max + padding;
 
-    if (x_min < 0) x_min = 0;
-    if (y_min < 0) y_min = 0;
-    if (x_max >= IMAGE_WIDTH)  x_max = IMAGE_WIDTH - 1;
-    if (y_max >= IMAGE_HEIGHT) y_max = IMAGE_HEIGHT - 1;
+  if (x_min < 0) x_min = 0;
+  if (y_min < 0) y_min = 0;
+  if (x_max >= IMAGE_WIDTH) x_max = IMAGE_WIDTH - 1;
+  if (y_max >= IMAGE_HEIGHT) y_max = IMAGE_HEIGHT - 1;
 
-    int width  = x_max - x_min + 1;
-    int height = y_max - y_min + 1;
-    int size   = (width > height) ? width : height;
+  int width = x_max - x_min + 1;
+  int height = y_max - y_min + 1;
+  int size = (width > height) ? width : height;
 
-    // clear to white
-    for (int i = 0; i < NORM_SIZE * NORM_SIZE; i++)
-        output[i] = 0xFFFF;
-    // center the symbol in the output grid
-    int x_offset = (size - width)  / 2;
-    int y_offset = (size - height) / 2;
+  // clear to white
+  for (int i = 0; i < NORM_SIZE * NORM_SIZE; i++) output[i] = 0xFFFF;
+  // center the symbol in the output grid
+  int x_offset = (size - width) / 2;
+  int y_offset = (size - height) / 2;
 
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            // map (x,y) in bounding box -> output pixel position
-            int out_x = ((x + x_offset) * NORM_SIZE) / size;
-            int out_y = ((y + y_offset) * NORM_SIZE) / size;
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      // map (x,y) in bounding box -> output pixel position
+      int out_x = ((x + x_offset) * NORM_SIZE) / size;
+      int out_y = ((y + y_offset) * NORM_SIZE) / size;
 
-            if (out_x < NORM_SIZE && out_y < NORM_SIZE) {
-                output[out_y * NORM_SIZE + out_x] =
-                    image[(y_min + y) * IMAGE_WIDTH + (x_min + x)];
-            }
-        }
+      if (out_x < NORM_SIZE && out_y < NORM_SIZE) {
+        output[out_y * NORM_SIZE + out_x] =
+            image[(y_min + y) * IMAGE_WIDTH + (x_min + x)];
+      }
     }
+  }
 }
 
 void plot_pixel(int x, int y, short color) {
@@ -456,48 +457,27 @@ void display_symbol(short* symbol) {
 
 void delay() { for (volatile int i = 0; i < 9750000; i++); }
 
-
-
-
 // float jaccard_similarity(short* image, const Template* template) {
 //   float union_pixels = 0.0;
 //   float intersection = 0.0;
-
-
-
 
 //   for (int i = 0; i < TOTAL; i++) {
 //     short i_pixel = (image[i] == 0x0000);
 //     short t_pixel = (template.data[i] == 0x0000);
 
-
-
-
 //     union_pixels += i_pixel | t_pixel;
 //     intersection += i_pixel & t_pixel;
 //   }
 
-
-
-
 //   return (union_pixels / intersection);
 // }
-
-
-
 
 // int best_template_math(short* image) {
 //   float max_jaccard_similarity = 0.0;
 //   int best_i;
 
-
-
-
 //   for (int i = 0; i < NUM_TEMPLATES; i++) {
 //     float similarity = jaccard_similarity(image, template_arr[i]);
-
-
-
 
 //     if (similarity > max_jaccard_similarity) {
 //       max_jaccard_similarity = similarity;
@@ -505,22 +485,12 @@ void delay() { for (volatile int i = 0; i < 9750000; i++); }
 //     }
 //   }
 
-
-
-
 //   return best_i;
 // }
 
-
-
-
 void dump_templates() {
-
-
-
-
   printf("Start");
-  for (int i = SYM_START_I; i < SYM_END_I + 1; i+=1) {
+  for (int i = SYM_START_I; i < SYM_END_I + 1; i += 1) {
     printf(" %d : { \"%s\", {", i, template_arr[i].label);
     for (int j = 0; j < NORM_SIZE * NORM_SIZE; j++) {
       printf("%d,", template_arr[i].data[j]);
@@ -529,4 +499,3 @@ void dump_templates() {
   }
   printf("Done");
 }
-

@@ -1,15 +1,16 @@
+#include <stdio.h>
+// #include <stdlib.h>
+
 #include "address_map.h"
 #include "templates.h"
 
-#include <stdio.h>
-
-//constants
+// constants
 #define IMAGE_WIDTH 320
 #define IMAGE_HEIGHT 240
 #define MAX_SYMBOLS 1
 #define NORM_SIZE 28
 #define Y_START 11
-#define Y_END 225 
+#define Y_END 225
 #define EDGE_IGNORE 10
 #define MIN_SYMBOL_AREA 100
 #define TOTAL 320 * 240
@@ -19,59 +20,47 @@
 #define SYM_END_I 40
 #define SEARCH_RANGE 4
 
-
-//symbol box definition
+// symbol box definition
 typedef struct {
   int x_min, x_max;  // left and right edge
   int y_min, y_max;  // top and bottom edge
 } BoundingBox;
 
-//globals
+// globals
 short symbols[MAX_SYMBOLS][NORM_SIZE * NORM_SIZE];
 volatile short int* pixel_buf_address = (short int*)0x08000000;
 // 7-segment encoding for digits 0-9
-// Segments: bit 0=a, 1=b, 2=c, 3=d, 4=e, 5=f, 6=g (0 = ON, 1 = OFF for common anode)
+// Segments: bit 0=a, 1=b, 2=c, 3=d, 4=e, 5=f, 6=g (0 = ON, 1 = OFF for common
+// anode)
 const unsigned char seven_seg[10] = {
-    0x3F, // 0: segments a,b,c,d,e,f ON
-    0x06, // 1: segments b,c ON
-    0x5B, // 2: segments a,b,d,e,g ON
-    0x4F, // 3: segments a,b,c,d,g ON
-    0x66, // 4: segments b,c,f,g ON
-    0x6D, // 5: segments a,c,d,f,g ON
-    0x7D, // 6: segments a,c,d,e,f,g ON
-    0x07, // 7: segments a,b,c ON
-    0x7F, // 8: all segments ON
-    0x6F  // 9: segments a,b,c,d,f,g ON
+    0x3F,  // 0: segments a,b,c,d,e,f ON
+    0x06,  // 1: segments b,c ON
+    0x5B,  // 2: segments a,b,d,e,g ON
+    0x4F,  // 3: segments a,b,c,d,g ON
+    0x66,  // 4: segments b,c,f,g ON
+    0x6D,  // 5: segments a,c,d,f,g ON
+    0x7D,  // 6: segments a,c,d,e,f,g ON
+    0x07,  // 7: segments a,b,c ON
+    0x7F,  // 8: all segments ON
+    0x6F   // 9: segments a,b,c,d,f,g ON
 };
-
 
 typedef struct {
   const char* label;
   float max_similarity;
 } Symbol;
 
-Symbol symbol_arr[13] = {{"1", 0.0},
-                         {"2", 0.0},
-                         {"3", 0.0},
-                         {"4", 0.0},
-                         {"5", 0.0},
-                         {"6", 0.0},
-                         {"7", 0.0},
-                         {"8", 0.0},
-                         {"9", 0.0},
-                         {"0", 0.0},
-                         {"+", 0.0},
-                         {"-", 0.0},
-                         {"x", 0.0},
-                         {"/", 0.0},
+Symbol symbol_arr[13] = {
+    {"1", 0.0}, {"2", 0.0}, {"3", 0.0}, {"4", 0.0}, {"5", 0.0},
+    {"6", 0.0}, {"7", 0.0}, {"8", 0.0}, {"9", 0.0}, {"0", 0.0},
+    {"+", 0.0}, {"-", 0.0}, {"x", 0.0}, {"/", 0.0},
 };
 
-
-//function declarations
+// function declarations
 int adaptive_threshold(short* image, BoundingBox* boxes);
 void median_filter(short int* buffer);
 int segment_symbols(short int* image, BoundingBox* boxes);
-//void display_cropped_symbol(short* image, BoundingBox box);
+// void display_cropped_symbol(short* image, BoundingBox box);
 void normalize_symbol(short int* image, BoundingBox box, short* output);
 void plot_pixel(int x, int y, short color);
 void clear_screen();
@@ -81,8 +70,7 @@ float correlated_similarity(short* image, const Template* template, int i);
 float best_template_match(short* image, int starting_index, int final_index);
 void display_int_on_hex(int value);
 void display_char_on_hex(char c);
-
-
+int sum_of_absolute_differences(short* image, const Template* templ, int i);
 
 int main(void) {
   // pointers to video-in dma controller
@@ -104,7 +92,6 @@ int main(void) {
       1;  // wriitng 1 to Buffer register triggers display - enable VGA output
 
   display_char_on_hex("0");
-  
 
   while (1) {
     int edge_capture = *(KEY_ptr + 3);
@@ -120,7 +107,7 @@ int main(void) {
 
       short normalized[NORM_SIZE * NORM_SIZE];
 
-       //now show cropped pieces
+      // now show cropped pieces
       for (int i = 0; i < num_symbols; i++) {
         normalize_symbol(image, boxes[i], normalized);
         display_symbol(normalized);
@@ -129,108 +116,139 @@ int main(void) {
 
       while (!(*(KEY_ptr + 3) & 0x2) && !(*(KEY_ptr + 3) & 0x4));
 
-      //if KEY1 is pressed then keep this image
-      //if KEY2 is pressed go back and try again
+      // if KEY1 is pressed then keep this image
+      // if KEY2 is pressed go back and try again
       if (*(KEY_ptr + 3) & 0x2) {
-
-        //find highest jacccard similarity with the image and each 1 template
+        // find highest jacccard similarity with the image and each 1 template
         int template_i = 0;
-        float best_score_overall = 0;
-        const char* best_match_so_far;
+        float best_score_overall_jaccard = 0;
+        const char* best_match_jaccard;
 
-        for (int i = 0; i < 13; i ++) {
-          float max_score = 0.0;
-  
+        int best_score_overall_sad = 1000000;
+        const char* best_match_sad;
+
+        int best_score_overall_ssd = 1000000;
+        const char* best_match_ssd;
+
+        for (int i = 0; i < 13; i++) {
+          float max_jaccard_score = 0.0;
+          int min_sad_score = 1000000;
+          int min_ssd_score = 1000000;
 
           const char* label = symbol_arr[i].label;
 
-          while (template_arr[template_i].label ==  label) {
-            float temp_score = correlated_similarity(normalized, template_arr, template_i);
-            
-            if (temp_score > max_score) {
-              max_score = temp_score;
+          while (!strcmp(template_arr[template_i].label, label)) {
+            float temp_jaccard_score =
+                correlated_similarity(normalized, template_arr, template_i);
+            int temp_sad_score = sum_of_absolute_differences(
+                normalized, template_arr, template_i);
+            int temp_ssd_score = sum_of_squared_differences(
+                normalized, template_arr, template_i);
+
+            if (temp_sad_score < min_sad_score) {
+              min_sad_score = temp_sad_score;
+            }
+
+            if (temp_ssd_score < min_ssd_score) {
+              min_ssd_score = temp_ssd_score;
+            }
+
+            if (temp_jaccard_score > max_jaccard_score) {
+              max_jaccard_score = temp_jaccard_score;
             }
 
             template_i++;
-            
           }
 
-          if (max_score > best_score_overall) {
-            best_score_overall = max_score;
-            best_match_so_far = label;
+          if (max_jaccard_score > best_score_overall_jaccard) {
+            best_score_overall_jaccard = max_jaccard_score;
+            best_match_jaccard = label;
+          }
+
+          if (min_sad_score < best_score_overall_sad) {
+            best_score_overall_sad = min_sad_score;
+            best_match_sad = label;
+          }
+
+          if (min_ssd_score < best_score_overall_ssd) {
+            best_score_overall_ssd = min_ssd_score;
+            best_match_ssd = label;
           }
         }
 
         // float score_1 =  best_template_match(normalized, 0, 5);
         // float score_2 =  best_template_match(normalized, 5, 10);
 
-        //printf("Score 1: %f, Score 2: %f\n", score_1, score_2);
+        // printf("Score 1: %f, Score 2: %f\n", score_1, score_2);
 
-        if (!strcmp(best_match_so_far, "1")) {
-            display_int_on_hex(1);
-        } else if (!strcmp(best_match_so_far,  "2")) {
-            display_int_on_hex(2);
-        } else if (!strcmp(best_match_so_far,  "3")) {
-            display_int_on_hex(3);
-        }  else if (!strcmp(best_match_so_far, "4")) {
-            display_int_on_hex(4);
-        }  else if (!strcmp(best_match_so_far,  "5")) {
-            display_int_on_hex(5);
-        } else if (!strcmp(best_match_so_far, "6")) {
-            display_int_on_hex(6);
-        } else if (!strcmp(best_match_so_far,  "7")) {
-            display_int_on_hex(7);
-        } else if (!strcmp(best_match_so_far, "8")) {
-            display_int_on_hex(8);
-        } else if (!strcmp(best_match_so_far,  "9")) {
-            display_int_on_hex(9);
-        } else if (!strcmp(best_match_so_far, "0")) {
-            display_int_on_hex(0);
-        } else if (!strcmp(best_match_so_far, "+")) {
-            display_char_on_hex('a');
-        } else if (!strcmp(best_match_so_far,  "-")) {
-            display_char_on_hex('S');
-        } else if (!strcmp(best_match_so_far, "x")) {
-            display_char_on_hex('p');
-        }  else if (!strcmp(best_match_so_far, "/")) {
-            display_char_on_hex('d');
-        }
+        printf("Best Jaccard Match: %s with score %f\n", best_match_jaccard,
+               best_score_overall_jaccard);
+        printf("Best SAD Match: %s with score %d\n", best_match_sad,
+               best_score_overall_sad);
+        printf("Best SSD Match: %s with score %d\n", best_match_ssd,
+               best_score_overall_ssd);
 
-        delay();    
-      } 
+        // if (!strcmp(best_match_so_far, "1")) {
+        //   display_int_on_hex(1);
+        // } else if (!strcmp(best_match_so_far, "2")) {
+        //   display_int_on_hex(2);
+        // } else if (!strcmp(best_match_so_far, "3")) {
+        //   display_int_on_hex(3);
+        // } else if (!strcmp(best_match_so_far, "4")) {
+        //   display_int_on_hex(4);
+        // } else if (!strcmp(best_match_so_far, "5")) {
+        //   display_int_on_hex(5);
+        // } else if (!strcmp(best_match_so_far, "6")) {
+        //   display_int_on_hex(6);
+        // } else if (!strcmp(best_match_so_far, "7")) {
+        //   display_int_on_hex(7);
+        // } else if (!strcmp(best_match_so_far, "8")) {
+        //   display_int_on_hex(8);
+        // } else if (!strcmp(best_match_so_far, "9")) {
+        //   display_int_on_hex(9);
+        // } else if (!strcmp(best_match_so_far, "0")) {
+        //   display_int_on_hex(0);
+        // } else if (!strcmp(best_match_so_far, "+")) {
+        //   display_char_on_hex('a');
+        // } else if (!strcmp(best_match_so_far, "-")) {
+        //   display_char_on_hex('S');
+        // } else if (!strcmp(best_match_so_far, "x")) {
+        //   display_char_on_hex('p');
+        // } else if (!strcmp(best_match_so_far, "/")) {
+        //   display_char_on_hex('d');
+        // }
 
-      *(KEY_ptr + 3) = 0xF; //clear all keys 
+        delay();
+      }
+
+      *(KEY_ptr + 3) = 0xF;  // clear all keys
 
       *(video_in_dma + 3) = 0x4;  // going back to video mode
-
-
     }
     display_char_on_hex("0");
-
-    }
-    return 0;
+  }
+  return 0;
 }
 
-void capture_template (short* image, BoundingBox box, uint8_t* out) {
-    short normalized[NORM_SIZE * NORM_SIZE];
-    normalize_symbol(image, box, normalized);
-    for (int i = 0; i < NORM_SIZE* NORM_SIZE; i++) {
-        out[i] = (normalized[i] == 0x0000) ? 0 : 1;
-    }
-
-
+void capture_template(short* image, BoundingBox box, uint8_t* out) {
+  short normalized[NORM_SIZE * NORM_SIZE];
+  normalize_symbol(image, box, normalized);
+  for (int i = 0; i < NORM_SIZE * NORM_SIZE; i++) {
+    out[i] = (normalized[i] == 0x0000) ? 0 : 1;
+  }
 }
 
-/*Calculates a threshold value for every single pixel based on the pixels in its immediate neighborhood 
-(e.g., a 15x15 block around it).
-If a pixel is darker than its local average, it's considered foreground (black digit).
-If a pixel is brighter than its local average, it's considered background (white board). */
+/*Calculates a threshold value for every single pixel based on the pixels in its
+immediate neighborhood (e.g., a 15x15 block around it). If a pixel is darker
+than its local average, it's considered foreground (black digit). If a pixel is
+brighter than its local average, it's considered background (white board). */
 int adaptive_threshold(short* image, BoundingBox* boxes) {
   int total = IMAGE_HEIGHT * IMAGE_WIDTH;
-  //Grayscale Conversion
+  // Grayscale Conversion
   for (int i = 0; i < total; i++) {
-    short pixel = *(pixel_buf_address + ((i / IMAGE_WIDTH) << 9) + (i % IMAGE_WIDTH));
-    
+    short pixel =
+        *(pixel_buf_address + ((i / IMAGE_WIDTH) << 9) + (i % IMAGE_WIDTH));
+
     int r = (pixel >> 11) & 0x1F;
     int g = (pixel >> 5) & 0x3F;
     int b = pixel & 0x1F;
@@ -240,29 +258,29 @@ int adaptive_threshold(short* image, BoundingBox* boxes) {
     b = (b * 255) / 31;
 
     unsigned char grey = (unsigned char)((77 * r + 150 * g + 29 * b) >> 8);
-    image[i] = (short)grey; // Current grayscale value stored in image array
+    image[i] = (short)grey;  // Current grayscale value stored in image array
   }
 
-  //Apply filter before thresholding
+  // Apply filter before thresholding
   median_filter(image);
 
   // Create a temporary buffer to store the new binary image.
-  static short binary_image[IMAGE_WIDTH * IMAGE_HEIGHT]; 
+  static short binary_image[IMAGE_WIDTH * IMAGE_HEIGHT];
 
-  // define the size of the neighborhood to look at. A 15x15 block 
-  // The 'constant_c' is a small subtraction to make the threshold a little more strict.
-  // This helps to keep small speckles out of the background.
-  int block_size = 15; 
-  int constant_c = 5;  
+  // define the size of the neighborhood to look at. A 15x15 block
+  // The 'constant_c' is a small subtraction to make the threshold a little more
+  // strict. This helps to keep small speckles out of the background.
+  int block_size = 15;
+  int constant_c = 5;
   int half_block = block_size / 2;
 
   for (int y = 0; y < IMAGE_HEIGHT; y++) {
     for (int x = 0; x < IMAGE_WIDTH; x++) {
-      
       long local_sum = 0;
       int count = 0;
 
-      // for each pixel, calculate the average grayscale value of its neighborhood.
+      // for each pixel, calculate the average grayscale value of its
+      // neighborhood.
       for (int dy = -half_block; dy <= half_block; dy++) {
         for (int dx = -half_block; dx <= half_block; dx++) {
           int nx = x + dx;
@@ -276,14 +294,16 @@ int adaptive_threshold(short* image, BoundingBox* boxes) {
       }
 
       int local_avg = local_sum / count;
-      int threshold = local_avg - constant_c; // local threshold for this specific pixel
+      int threshold =
+          local_avg - constant_c;  // local threshold for this specific pixel
 
       // Apply the threshold for this pixel:
-      // If the pixel is darker than its local average (minus the constant), it's part of a digit.
+      // If the pixel is darker than its local average (minus the constant),
+      // it's part of a digit.
       if (image[y * IMAGE_WIDTH + x] <= threshold) {
-        binary_image[y * IMAGE_WIDTH + x] = 0x0000; // Black (digit)
+        binary_image[y * IMAGE_WIDTH + x] = 0x0000;  // Black (digit)
       } else {
-        binary_image[y * IMAGE_WIDTH + x] = 0xFFFF; // White (background)
+        binary_image[y * IMAGE_WIDTH + x] = 0xFFFF;  // White (background)
       }
     }
   }
@@ -293,21 +313,22 @@ int adaptive_threshold(short* image, BoundingBox* boxes) {
     image[i] = binary_image[i];
   }
 
-  //display binary
+  // display binary
   for (int y = 0; y < IMAGE_HEIGHT; y++) {
     for (int x = 0; x < IMAGE_WIDTH; x++) {
-      //edge forcing band logic
-      if (y < Y_START || y > Y_END || x < EDGE_IGNORE || x > IMAGE_WIDTH - EDGE_IGNORE - 1 || y > IMAGE_HEIGHT-1) {
-          image[y * IMAGE_WIDTH + x] = 0xFFFF; // Force it white
-          *(pixel_buf_address + (y << 9) + x) = 0xFFFF;
+      // edge forcing band logic
+      if (y < Y_START || y > Y_END || x < EDGE_IGNORE ||
+          x > IMAGE_WIDTH - EDGE_IGNORE - 1 || y > IMAGE_HEIGHT - 1) {
+        image[y * IMAGE_WIDTH + x] = 0xFFFF;  // Force it white
+        *(pixel_buf_address + (y << 9) + x) = 0xFFFF;
       } else {
-          *(pixel_buf_address + (y << 9) + x) = image[y * IMAGE_WIDTH + x];
+        *(pixel_buf_address + (y << 9) + x) = image[y * IMAGE_WIDTH + x];
       }
     }
   }
 
-  delay(); 
-  return segment_symbols(image, boxes); 
+  delay();
+  return segment_symbols(image, boxes);
 }
 
 void median_filter(short int* buffer) {  // removes noise from binary image
@@ -400,17 +421,18 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
         boxes[count].y_min = y_min;  // Save TOP boundary
         boxes[count].y_max = y_max;  // Save BOTTOM boundary
 
-         //New component logic
+        // New component logic
         int current_width = boxes[count].x_max - boxes[count].x_min + 1;
         int current_height = boxes[count].y_max - boxes[count].y_min + 1;
         int current_area = current_width * current_height;
         if (current_area >= MIN_SYMBOL_AREA) {
-          count++; //It's a real symbol, move to the next box
+          count++;  // It's a real symbol, move to the next box
         } else {
-        //Not a real symbol - noise dot. Do nothing.
-        // The next object will overwrite this index (count) in the boxes array.
+          // Not a real symbol - noise dot. Do nothing.
+          //  The next object will overwrite this index (count) in the boxes
+          //  array.
         }
-        in_symbol = 0;               // We are no longer inside a symbol
+        in_symbol = 0;  // We are no longer inside a symbol
         gap_count = 0;
         if (count >= MAX_SYMBOLS) break;  // Prevent overflow
       }
@@ -445,40 +467,39 @@ int segment_symbols(short int* image, BoundingBox* boxes) {
 }
 
 void normalize_symbol(short int* image, BoundingBox box, short* output) {
-    int padding = 3;
-    int x_min = box.x_min - padding;
-    int x_max = box.x_max + padding;
-    int y_min = box.y_min - padding;
-    int y_max = box.y_max + padding;
+  int padding = 3;
+  int x_min = box.x_min - padding;
+  int x_max = box.x_max + padding;
+  int y_min = box.y_min - padding;
+  int y_max = box.y_max + padding;
 
-    if (x_min < 0) x_min = 0;
-    if (y_min < 0) y_min = 0;
-    if (x_max >= IMAGE_WIDTH)  x_max = IMAGE_WIDTH - 1;
-    if (y_max >= IMAGE_HEIGHT) y_max = IMAGE_HEIGHT - 1;
+  if (x_min < 0) x_min = 0;
+  if (y_min < 0) y_min = 0;
+  if (x_max >= IMAGE_WIDTH) x_max = IMAGE_WIDTH - 1;
+  if (y_max >= IMAGE_HEIGHT) y_max = IMAGE_HEIGHT - 1;
 
-    int width  = x_max - x_min + 1;
-    int height = y_max - y_min + 1;
-    int size   = (width > height) ? width : height;
+  int width = x_max - x_min + 1;
+  int height = y_max - y_min + 1;
+  int size = (width > height) ? width : height;
 
-    // clear to white
-    for (int i = 0; i < NORM_SIZE * NORM_SIZE; i++)
-        output[i] = 0xFFFF;
-    // center the symbol in the output grid
-    int x_offset = (size - width)  / 2;
-    int y_offset = (size - height) / 2;
+  // clear to white
+  for (int i = 0; i < NORM_SIZE * NORM_SIZE; i++) output[i] = 0xFFFF;
+  // center the symbol in the output grid
+  int x_offset = (size - width) / 2;
+  int y_offset = (size - height) / 2;
 
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            // map (x,y) in bounding box -> output pixel position
-            int out_x = ((x + x_offset) * NORM_SIZE) / size;
-            int out_y = ((y + y_offset) * NORM_SIZE) / size;
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      // map (x,y) in bounding box -> output pixel position
+      int out_x = ((x + x_offset) * NORM_SIZE) / size;
+      int out_y = ((y + y_offset) * NORM_SIZE) / size;
 
-            if (out_x < NORM_SIZE && out_y < NORM_SIZE) {
-                output[out_y * NORM_SIZE + out_x] =
-                    image[(y_min + y) * IMAGE_WIDTH + (x_min + x)];
-            }
-        }
+      if (out_x < NORM_SIZE && out_y < NORM_SIZE) {
+        output[out_y * NORM_SIZE + out_x] =
+            image[(y_min + y) * IMAGE_WIDTH + (x_min + x)];
+      }
     }
+  }
 }
 
 void plot_pixel(int x, int y, short color) {
@@ -518,108 +539,210 @@ void display_symbol(short* symbol) {
 
 void delay() { for (volatile int i = 0; i < 9750000; i++); }
 
+// int sum_of_absolute_differences(short* image, const Template* templ, int i) {
+//   int sum = 0;
+
+//   for (int x = 0; x < NORM_SIZE; x++) {
+//     for (int y = 0; y < NORM_SIZE; y++) {
+//       int i_pixel = (image[y * NORM_SIZE + x] == 0x0000) ? 1 : 0;
+//       int t_pixel = templ[i].data[y * NORM_SIZE + x];
+
+//       sum += abs(i_pixel - t_pixel);
+//     }
+//   }
+
+//   return sum;
+// }
+
+long correlated_sad(short* image, const Template* tmpl, int j) {
+  long min_sad = 2147483647;  // INT_MAX
+
+  for (int dy = -SEARCH_RANGE; dy <= SEARCH_RANGE; dy++) {
+    for (int dx = -SEARCH_RANGE; dx <= SEARCH_RANGE; dx++) {
+      long current_sad = 0;
+
+      for (int y = 0; y < NORM_SIZE; y++) {
+        for (int x = 0; x < NORM_SIZE; x++) {
+          int tx = x + dx;
+          int ty = y + dy;
+
+          int a = (image[y * NORM_SIZE + x] == 0x0000) ? 0 : 1;
+          int b = 0;
+
+          if (tx >= 0 && tx < NORM_SIZE && ty >= 0 && ty < NORM_SIZE) {
+            b = tmpl[j].data[ty * NORM_SIZE + tx];
+          }
+
+          // int diff = a - b;
+          current_sad += (a - b < 0) ? (b - a) : (a - b);
+        }
+      }
+
+      if (current_sad < min_sad) {
+        min_sad = current_sad;
+      }
+    }
+  }
+
+  return min_sad;  // lower = better
+}
+
+long correlated_ssd(short* image, const Template* tmpl, int j) {
+  long min_ssd = 2147483647;  // INT_MAX
+
+  for (int dy = -SEARCH_RANGE; dy <= SEARCH_RANGE; dy++) {
+    for (int dx = -SEARCH_RANGE; dx <= SEARCH_RANGE; dx++) {
+      long current_ssd = 0;
+
+      for (int y = 0; y < NORM_SIZE; y++) {
+        for (int x = 0; x < NORM_SIZE; x++) {
+          int tx = x + dx;
+          int ty = y + dy;
+
+          int a = (image[y * NORM_SIZE + x] == 0x0000) ? 0 : 1;
+          int b = 0;
+
+          if (tx >= 0 && tx < NORM_SIZE && ty >= 0 && ty < NORM_SIZE) {
+            b = tmpl[j].data[ty * NORM_SIZE + tx];
+          }
+
+          // int diff = a - b;
+          current_ssd += (a - b) * (a - b);
+        }
+      }
+
+      if (current_ssd < min_ssd) {
+        min_ssd = current_ssd;
+      }
+    }
+  }
+
+  return min_ssd;  // lower = better
+}
+
+// int sum_of_squared_differences(short* image, const Template* templ, int i) {
+//   int sum = 0;
+
+//   for (int x = 0; x < NORM_SIZE; x++) {
+//     for (int y = 0; y < NORM_SIZE; y++) {
+//       int i_pixel = (image[y * NORM_SIZE + x] == 0x0000) ? 1 : 0;
+//       int t_pixel = templ[i].data[y * NORM_SIZE + x];
+
+//       sum += (i_pixel - t_pixel) * (i_pixel - t_pixel);
+//     }
+//   }
+
+//   return sum;
+// }
 
 float correlated_similarity(short* image, const Template* template, int j) {
+  int max_intersection = 0;
+  int best_union = 1;
 
-    int max_intersection= 0;
-    int best_union = 1;
+  // use correlated similarity instead
+  // this approach "slides" the image over the sample until it obtains the
+  // highest jaccard score this is considered to be the most accurate score as
+  // it accounts for mislaignemnt
 
-     //use correlated similarity instead
-  //this approach "slides" the image over the sample until it obtains the highest jaccard score
-  //this is considered to be the most accurate score as it accounts for mislaignemnt
+  // takes ratio of intersection over union
+  // how many pixels are black in BOTH images / how many pixels are black in
+  // EITHER image
 
-  //takes ratio of intersection over union
-  //how many pixels are black in BOTH images / how many pixels are black in EITHER image
+  for (int dy = -SEARCH_RANGE; dy <= SEARCH_RANGE; dy++) {
+    for (int dx = -SEARCH_RANGE; dx <= SEARCH_RANGE; dx++) {
+      int current_intersection = 0;
+      int current_union = 0;
 
-    for (int  dy = -SEARCH_RANGE; dy <= SEARCH_RANGE; dy++) {
-        for (int dx = -SEARCH_RANGE; dx <= SEARCH_RANGE; dx++) {
-            int current_intersection = 0;
-            int current_union = 0;
+      for (int y = 0; y < NORM_SIZE; y++) {
+        for (int x = 0; x < NORM_SIZE; x++) {
+          int tx = x + dx;
+          int ty = y + dy;
 
-            for (int y = 0; y < NORM_SIZE; y++) {
-                for (int x= 0; x < NORM_SIZE; x++) {
-                    int tx = x + dx;
-                    int ty = y + dy;
+          int i_pixel = (image[y * NORM_SIZE + x] == 0x0000);
+          int t_pixel = 0;
 
-                    int i_pixel = (image[y*NORM_SIZE + x] == 0x0000);
-                    int t_pixel =0;
+          if (tx >= 0 && tx < NORM_SIZE && ty >= 0 && ty < NORM_SIZE) {
+            t_pixel = (template[j].data[ty * NORM_SIZE + tx]);
+          }
 
-                    if (tx>= 0 && tx < NORM_SIZE && ty >= 0 && ty < NORM_SIZE) {
-                        t_pixel = (template[j].data[ty * NORM_SIZE + tx]);
-                    }
-
-                    current_intersection += (i_pixel & t_pixel);
-                    current_union += (i_pixel | t_pixel);
-                }
-            } 
-
-            if (current_intersection > max_intersection) {
-                max_intersection = current_intersection;
-                best_union = current_union;
-            }
+          current_intersection += (i_pixel & t_pixel);
+          current_union += (i_pixel | t_pixel);
         }
+      }
+
+      if (current_intersection > max_intersection) {
+        max_intersection = current_intersection;
+        best_union = current_union;
+      }
     }
-    return (float)max_intersection / (float)best_union;
+  }
+  return (float)max_intersection / (float)best_union;
 }
 
-
-
-//Written by claude.ai
+// Written by claude.ai
 void display_int_on_hex(int value) {
-    volatile int* HEX0 = (int*)HEX3_HEX0_BASE;       // HEX0 is bits 7:0
-    volatile int* HEX2 = (int*)HEX5_HEX4_BASE;       // HEX2 is at separate base
+  volatile int* HEX0 = (int*)HEX3_HEX0_BASE;  // HEX0 is bits 7:0
+  volatile int* HEX2 = (int*)HEX5_HEX4_BASE;  // HEX2 is at separate base
 
-    // clamp to valid range
-    if (value < 0)   value = 0;
-    if (value > 239) value = 239;
+  // clamp to valid range
+  if (value < 0) value = 0;
+  if (value > 239) value = 239;
 
-    int hundreds = value / 100;         // 0 or 1 or 2
-    int tens     = (value / 10) % 10;
-    int ones     = value % 10;
+  int hundreds = value / 100;  // 0 or 1 or 2
+  int tens = (value / 10) % 10;
+  int ones = value % 10;
 
-    // HEX3_HEX0_BASE controls HEX3(bits31:24) HEX2(bits23:16) HEX1(bits15:8) HEX0(bits7:0)
-    int current = *HEX0;
-    current &= 0xFF000000;  // preserve HEX3, clear HEX2/HEX1/HEX0
-    current |= (seven_seg[hundreds] << 16);  // HEX2
-    current |= (seven_seg[tens]     <<  8);  // HEX1
-    current |= (seven_seg[ones]          );  // HEX0
-    *HEX0 = current;
+  // HEX3_HEX0_BASE controls HEX3(bits31:24) HEX2(bits23:16) HEX1(bits15:8)
+  // HEX0(bits7:0)
+  int current = *HEX0;
+  current &= 0xFF000000;  // preserve HEX3, clear HEX2/HEX1/HEX0
+  current |= (seven_seg[hundreds] << 16);  // HEX2
+  current |= (seven_seg[tens] << 8);       // HEX1
+  current |= (seven_seg[ones]);            // HEX0
+  *HEX0 = current;
 }
 
-
-//Written by claude.ai
+// Written by claude.ai
 
 // 7-segment encoding: segments = gfedcba (bit 6 to bit 0)
 // 0 = segment ON, 1 = segment OFF (active low on DE1-SoC)
 
 void display_char_on_hex(char c) {
-    volatile int* HEX_ptr = (int*)HEX3_HEX0_BASE;
-    
-    int segments;
-    
-    switch(c) {
-        case 'p': segments = 0x73; break;  //  _
-                                           // |_|
-                                           // |
-        case 'S': segments = 0x6D; break;  //  _
-                                           // |_
-                                           //  _|
-        case 'a': segments = 0x77; break;  //  _
-                                           // |_|
-                                           // | |
-        case 'd': segments = 0x5E; break;  //
-                                           //  _|
-                                           // |_|
-        default:  segments = 0x00; break;  // all off
-    }
-    
-    *HEX_ptr = segments;
+  volatile int* HEX_ptr = (int*)HEX3_HEX0_BASE;
+
+  int segments;
+
+  switch (c) {
+    case 'p':
+      segments = 0x73;
+      break;  //  _
+              // |_|
+              // |
+    case 'S':
+      segments = 0x6D;
+      break;  //  _
+              // |_
+              //  _|
+    case 'a':
+      segments = 0x77;
+      break;  //  _
+              // |_|
+              // | |
+    case 'd':
+      segments = 0x5E;
+      break;  //
+              //  _|
+              // |_|
+    default:
+      segments = 0x00;
+      break;  // all off
+  }
+
+  *HEX_ptr = segments;
 }
 
-
 // The 7-segment layout for reference:
-// 
+//
 //  _
 // |_|   segments: a=top, b=top-right, c=bottom-right,
 // |_|            d=bottom, e=bottom-left, f=top-left, g=middle
-
