@@ -71,6 +71,8 @@ float best_template_match(short* image, int starting_index, int final_index);
 void display_int_on_hex(int value);
 void display_char_on_hex(char c);
 int sum_of_absolute_differences(short* image, const Template* templ, int i);
+long correlated_sad(short* image, const Template* templ, int i);
+long correlated_ssd(short* image, const Template* templ, int i);
 
 int main(void) {
   // pointers to video-in dma controller
@@ -91,7 +93,7 @@ int main(void) {
   *pixel_buf_ctrl =
       1;  // wriitng 1 to Buffer register triggers display - enable VGA output
 
-  display_char_on_hex("0");
+  display_char_on_hex('0');
 
   while (1) {
     int edge_capture = *(KEY_ptr + 3);
@@ -124,10 +126,10 @@ int main(void) {
         float best_score_overall_jaccard = 0;
         const char* best_match_jaccard;
 
-        int best_score_overall_sad = 1000000;
+        long best_score_overall_sad = 1000000;
         const char* best_match_sad;
 
-        int best_score_overall_ssd = 1000000;
+        long best_score_overall_ssd = 1000000;
         const char* best_match_ssd;
 
         for (int i = 0; i < 13; i++) {
@@ -140,10 +142,10 @@ int main(void) {
           while (!strcmp(template_arr[template_i].label, label)) {
             float temp_jaccard_score =
                 correlated_similarity(normalized, template_arr, template_i);
-            int temp_sad_score = sum_of_absolute_differences(
-                normalized, template_arr, template_i);
-            int temp_ssd_score = sum_of_squared_differences(
-                normalized, template_arr, template_i);
+            long temp_sad_score =
+                correlated_sad(normalized, template_arr, template_i);
+            long temp_ssd_score =
+                correlated_ssd(normalized, template_arr, template_i);
 
             if (temp_sad_score < min_sad_score) {
               min_sad_score = temp_sad_score;
@@ -225,7 +227,7 @@ int main(void) {
 
       *(video_in_dma + 3) = 0x4;  // going back to video mode
     }
-    display_char_on_hex("0");
+    display_char_on_hex('0');
   }
   return 0;
 }
