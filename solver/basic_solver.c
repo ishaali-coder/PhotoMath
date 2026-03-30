@@ -210,7 +210,6 @@ int main(void) {
   }
   return 0;
 }
-
 void solve_equation(char* equation, int n) {
 
   //for (int n = 0; n < MAX_SYMBOLS && (equation[n] != ' '); n++); 
@@ -231,23 +230,31 @@ Answer: 17*/
   for (int i = 0; i < n; i ++ ) {
 
     char sym = equation[i];
+
     if (i < n/2 && n == 3) {
       eq += (sym - '0');
-    } else if (i < n/2 && n > 3) {
-      eq = eq * (10^n) + (sym - '0');
+
+
+    } else if (i < n/2 && n > 3) {//numbers with more than 1 digit
+      eq = eq * (10) + (sym - '0'); //multply old number by 10 to shift to tens and add new number in ones place
+
 
     } else if (i == n/2) {
 
-      if (sym == '-') mode +=1;
+      if (sym == '-') mode +=1; 
       else if (sym == 'x') mode += 2;
       else if (sym == '/') mode += 3;
 
+
+
     } else if (i > n/2) {
       
-      if (!mode) eq += (sym - '0');
-      else if (mode) eq -= (sym - '0');
-      else if (mode == 2) eq *= (sym - '0');
-      else if (mode == 3) eq /= (sym - '0');
+      if (mode == 0) {eq = eq + (sym - '0');}
+      else if (mode == 1) {eq = eq - (sym - '0');}
+      else if (mode == 2) { eq = eq * (sym - '0') ;}
+      else if (mode == 3) {eq = eq / (sym - '0'); }
+
+
  
     }
 
