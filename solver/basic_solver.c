@@ -210,58 +210,75 @@ int main(void) {
   }
   return 0;
 }
-void solve_equation(char* equation, int n) {
+float solve_equation(char* equation, int n) {
 
-  //for (int n = 0; n < MAX_SYMBOLS && (equation[n] != ' '); n++); 
+  char op;
 
-  int eq= 0;
-  int mode = 0; //o add
-  //1 sub
-  //2 mult
-  //3 div
+  Operator operators[4];
+  
+  int i_op = 0; //look for operator index and figure out what operation we're trying to 
+  // for (int i = 0; i < n && i_op < 4; i++) {
 
-  /* Test case to debug" 4Best SAD Match: 1 with score 58
-Best SAD Match: 1 with score 49
-Best SAD Match: + with score 135
-Best SAD Match: 2 with score 101
+  //   char sym = equation[i];
 
-Answer: 17*/
+  //   if ((sym == '+' || sym == '-' || sym == 'x' || sym == '/')) {
+  //     operators[i_op].label = sym;
+  //     operators[i_op].index = i;
+  //     operators[i_op].priority = (sym == '+' || sym == '-') ? 1 : 2; // assign priority based on operator type
+      
+  //     i_op++;
+  //   }
 
-  for (int i = 0; i < n; i ++ ) {
+
+
+  // }
+
+  
+
+  float eq = 0.0;
+  float second_num = 0.0;
+  int num_digits_first = i_op;
+  int num_digits_second = n - i_op - 1;
+
+  for (int i = 0; i < n && i_op == 1; i ++ ) {
 
     char sym = equation[i];
 
-    if (i < n/2 && n == 3) {
-      eq += (sym - '0');
+    //if we're at the first digit and first digit is ones
 
+    if (i < i_op && num_digits_first == 1) { 
+      eq += (sym - '0'); //if this is the first number in the eq just add it in
+      //now eq = first_dig
 
-    } else if (i < n/2 && n > 3) {//numbers with more than 1 digit
+    } else if (i < i_op && num_digits_first > 1) {//first number has more than 1 digit
       eq = eq * (10) + (sym - '0'); //multply old number by 10 to shift to tens and add new number in ones place
 
-
-    } else if (i == n/2) {
-
-      if (sym == '-') mode +=1; 
-      else if (sym == 'x') mode += 2;
-      else if (sym == '/') mode += 3;
-
-
-
-    } else if (i > n/2) {
-      
-      if (mode == 0) {eq = eq + (sym - '0');}
-      else if (mode == 1) {eq = eq - (sym - '0');}
-      else if (mode == 2) { eq = eq * (sym - '0') ;}
-      else if (mode == 3) {eq = eq / (sym - '0'); }
-
-
+    } else if (i > i_op && num_digits_second == 1) {
+      second_num = (sym - '0'); //second num = equation[n-1]
  
-    }
+    } else if (i > i_op && num_digits_second > 1) {
+      second_num = second_num * 10 + (sym - '0'); //build second number  
+    } 
 
+    //only finish evaluatiing the equation when the second number has been fully reconstructed
+    if (i == n-1) {
+        if (op == '+') eq += second_num; //addition mode
+        else if (op == '-') eq -= second_num; //subtraction mode
+        else if (op == 'x') eq *= second_num ; //multiplication mode
+        else if (op == '/') {
+           //division mode
+          if (second_num == 0) {
+            printf("\nError: Division by zero\n");
+            
+          } else {
+            eq = (float) eq / (float) second_num;
+          }
+        }
+    }
   }
 
-  printf("\nAnswer: %d\n", eq);
-
+  printf("\nAnswer: %.1f\n", eq);
+  return eq;
 }
 
 void adaptive_threshold(short* image) {
