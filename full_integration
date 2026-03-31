@@ -1389,11 +1389,11 @@ void display_answer(int answer) {
   sprintf(str, "%d", answer); // KEEP digits only
   int len = strlen(str);
 
-  int scale = 4;
+  int scale = 6;
   int char_spacing = (NORM_SIZE * scale) + 5;
 
   // "=" size
-  int eq_width = (NORM_SIZE * scale);
+  int eq_width = (NORM_SIZE * scale) * 0.7;
   int gap = 20;
 
   // total width INCLUDING "="
@@ -1401,7 +1401,6 @@ void display_answer(int answer) {
 
   int x_start = (IMAGE_WIDTH - total_width) / 2;
   int y_start = (IMAGE_HEIGHT - (NORM_SIZE * scale)) / 2;
-
   // DRAW "=" SIGN
   int eq_x = x_start;
   int eq_y = y_start + (NORM_SIZE * scale) / 2 - 10;
