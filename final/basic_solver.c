@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #include "address_map.h"
 #include "templates.h"
 #include "backgrounds.h"
@@ -15,8 +16,7 @@
 #define TOTAL 320 * 240
 #define OPERATOR_START_I 34  // current index in templ array where operators start being stored
 #define SEARCH_RANGE 4
-#define MIN_SYMBOL_AREA 100 
-
+#define MIN_SYMBOL_AREA 100
 
 // symbol box definition
 typedef struct {
@@ -26,7 +26,7 @@ typedef struct {
 
 // might be able to chnage this from a struct to an array of chars instead
 typedef struct {
-   char label;      // used to dteermine what symbol
+  const char label;      // used to dteermine what symbol
   float max_similarity;  // not used --> might not need ?
   // wait to see if i will add more properties later when feature matching is further implemented
 } Symbol;
@@ -66,7 +66,8 @@ void draw_background();
 void draw_calculating();
 void draw_instruction();
 void draw_equals(int x, int y, int width, int thickness, short color);
-void display_answer(int answer);
+void display_answer(float answer);
+int calculate_weighted_diff(short *img, const uint8_t *templ, int dx, int dy);
 
 int main(void) {
   // pointers to video-in dma controller
@@ -98,134 +99,63 @@ int main(void) {
       *(video_in_dma + 3) = 0x0; // Stop camera
       draw_instruction();
       while (*sw_addr & 0x1); // Wait for switch0 to be flipped off
-      //*(video_in_dma + 1) = 0x08000000;  
-      //*(video_in_dma + 3) = 0x4; // Restart camera
     }
     else if (*sw_addr & 0x2) {
+      *(KEY_ptr + 3) = 0xF;
       *(video_in_dma + 1) = 0x08000000;  
       *(video_in_dma + 3) = 0x4; // Restart camera
-      //int edge_capture = *(KEY_ptr + 3);
       if (*(KEY_ptr + 3) & 0x1) {  // check if key0 was pressed and released
         *(KEY_ptr + 3) = 0x1;       // clearedge capture bit by writing 1 to first bit
         *(video_in_dma + 3) = 0x0;  // takes a pic (enable goes from 1--> 0)
 
         BoundingBox boxes[MAX_SYMBOLS];
         short image[TOTAL];
-
         adaptive_threshold(image);
-       // int num_symbols = segment_symbols(image, boxes);
-       int num_symbols = 3;
-        printf("%d", num_symbols);
-        short normalized[NORM_SIZE * NORM_SIZE] = {1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,};
-        short normalized2[NORM_SIZE * NORM_SIZE] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,};
-        short normalized3[NORM_SIZE * NORM_SIZE] = 
-{1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,};
-
-        // now show cropped pieces
-        //   for (int i = 0; i < num_symbols; i++) {
-        //     normalize_symbol(image, boxes[i], normalized);
-        //     display_symbol(normalized);
-        //     delay();
-        //   }
-
-        // wait til key press to confirm
+        int num_symbols = segment_symbols(image, boxes);
+        printf("Numer of symbols recognized: %d/n", num_symbols);
+        short normalized[NORM_SIZE * NORM_SIZE];
+        char equation[MAX_SYMBOLS];
+        memset(equation, 0, sizeof(equation));
 
         while (!(*(KEY_ptr + 3) & 0x2) && !(*(KEY_ptr + 3) & 0x4));
         // if KEY1 is pressed then keep this image
         // if KEY2 is pressed go back and try again
         if (*(KEY_ptr + 3) & 0x2) { 
           *(KEY_ptr + 3) = 0xF; //clear edge capture
-          char equation[MAX_SYMBOLS];
           for (int x = 0; x < MAX_SYMBOLS; x ++) equation[x] = ' ';
+          int sym_i = 0;
 
           // find lowest difference between the image and each number
-          for (int sym_i = 0; sym_i < num_symbols; sym_i++) {
-            // normalize_symbol(image, boxes[sym_i], normalized);
-            // display_symbol(normalized);
-            // delay();
+          for (sym_i; sym_i < num_symbols; sym_i++) {
+            normalize_symbol(image, boxes[sym_i], normalized);
+            float captured_ratio = calculate_aspect_ratio_input(normalized);
+            long best_score_overall = 2147483647;
+            char best_char = '?';
+            display_symbol(normalized);
+            delay();
 
-           // normalized = {1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,};
+            // 3. Compare against ALL templates
+            for (int symbol_i = 0; symbol_i < 14; symbol_i++) {
+              char label = symbol_arr[symbol_i].label;
+            
+              // heuristic filtering
+              // If the captured shape is very wide, it's likely '-' or 'x', not '1'
+              if (label == '1' && captured_ratio > 0.6) continue; 
+              // If the captured shape is very tall, it's likely a digit, not '-'
+              if (label == '-' && ( captured_ratio < 1.5 && captured_ratio > -1)) continue;
 
-            int template_i;                    // used to loop throough the array of presaved templates
-            int symbol_i_start, symbol_i_max;  // used to loop through all possible symbols
-            if (sym_i == 1) {  //  --> assuming operator is always in the middle
-              template_i = OPERATOR_START_I;
-              symbol_i_start = 10;
-              symbol_i_max = 14;
-
-            } else {  // if we're not in the middle then we're looking at a digit
-              // digits are first in both the symbol and template arrays
-              template_i = 0;
-              symbol_i_start = 0;
-              symbol_i_max = 10;
-            }
-
-            long best_score_overall_sad = 1000000;
-            char best_match_sad;
-            //float ratio;
-
-            // for each possible symbol in the symbol array
-            // caluclate the difference between the input image and each template
-            // we have saved for that digit use the max score out of all templates
-            // for a symbol when comparing to other symbols this makes sure each
-            // symbol "gets a starting chance"
-
-            for (int symbol_i = symbol_i_start; symbol_i < symbol_i_max; symbol_i++) {
-              //int template_i = template_i_start;
-              int min_sad_score = 1000000;  // xtart with a high number as we want to minimize difference
-              const char label = symbol_arr[symbol_i].label;
-              // label of the symbol we're currently looking at
-
-
-              // for (int t = 0; t < NUM_TEMPLATES; t++) {
-              //   if (template_arr[t].label == label) {
-              //     long score = correlated_sad(normalized, template_arr, t);
-              //     if (score < min_sad_score) {
-              //     // store if we have found a new minimum ifference fr thsi symbol
-              //     min_sad_score = score;
-              //     best_match_sad = label;
-              //   }
-
-              //   }
-              
-
-              while (template_arr[template_i].label == label && sym_i == 0) {
-                long temp_sad_score = correlated_sad(normalized, template_arr, template_i);
-                if (temp_sad_score < min_sad_score) {
-                  // store if we have found a new minimum ifference fr thsi symbol
-                  min_sad_score = temp_sad_score;
+              for (int t_idx = 0; t_idx < MAX_TEMPLATES; t_idx++) {
+                if (template_arr[t_idx].label == label) {
+                  long score = correlated_sad(normalized, template_arr, t_idx);
+                  if (score < best_score_overall) {
+                    best_score_overall = score;
+                    best_char = label;
+                  }
                 }
-                template_i++;
-              }
-               while (template_arr[template_i].label == label && sym_i == 1) {
-                long temp_sad_score = correlated_sad(normalized2, template_arr, template_i);
-                if (temp_sad_score < min_sad_score) {
-                  // store if we have found a new minimum ifference fr thsi symbol
-                  min_sad_score = temp_sad_score;
-                }
-                template_i++;
-              }
-              while (template_arr[template_i].label == label && sym_i == 2) {
-                long temp_sad_score = correlated_sad(normalized3, template_arr, template_i);
-                if (temp_sad_score < min_sad_score) {
-                  // store if we have found a new minimum ifference fr thsi symbol
-                  min_sad_score = temp_sad_score;
-                }
-                template_i++;
-              }
-
-              // at the end of checking all templates for this symbol compare to
-              // the best match we have found overall if this score is a
-              // mincompared to the min score of all other templates its our new
-              // best match
-              if (min_sad_score < best_score_overall_sad) {
-                best_score_overall_sad = min_sad_score;
-                best_match_sad = label;
-                //ratio = template_arr[template_i].aspect_ratio / calculate_aspect_ratio_input(normalized);  // only calculate aspect ratio for our current best match
               }
             }
-            printf("Best SAD Match: %c with score %ld\n", best_match_sad, best_score_overall_sad);
-            equation[sym_i] = best_match_sad;
+            printf("Symbol %d Match: %c (Score: %ld, Ratio: %.2f)\n", sym_i, best_char, best_score_overall, captured_ratio);
+            equation[sym_i] = best_char;
           }
           draw_calculating();
           delay();
@@ -246,71 +176,78 @@ int main(void) {
       while (!(*sw_addr & 0x3)); //wait until any switch is flipped
     }
   } 
-
   return 0;
 }
 
-
 float solve_equation(char* equation, int n) {
+    char op = ' ';
+    int i_op = -1;
 
-  char op;
-
-  int i_op = 0; //look for operator index and figure out what operation we're trying to 
-  for (int i = 0; i < n && i_op < 4; i++) {
-
-    char sym = equation[i];
-
-    if ((sym == '+' || sym == '-' || sym == 'x' || sym == '/')) {
-      op = sym;
-      i_op = i;
-      break;
-    }
-  }
-
-  float eq = 0.0;
-  float second_num = 0.0;
-  int num_digits_first = i_op;
-  int num_digits_second = n - i_op - 1;
-
-  for (int i = 0; i < n && i_op == 1; i ++ ) {
-
-    char sym = equation[i];
-
-    //if we're at the first digit and first digit is ones
-    if (i < i_op && num_digits_first == 1) { 
-      eq += (sym - '0'); // just add it in
-      //now eq = first_dig
-
-    } else if (i < i_op && num_digits_first > 1) {//first number has more than 1 digit
-      eq = eq * (10) + (sym - '0'); //multply old number by 10 to shift to tens and add new number in ones place
-
-    } else if (i > i_op && num_digits_second == 1) {
-      second_num = (sym - '0'); //second num = equation[n-1]
- 
-    } else if (i > i_op && num_digits_second > 1) {
-      second_num = second_num * 10 + (sym - '0'); //build second number  
-    } 
-
-    //only finish evaluatiing the equation when the second number has been fully reconstructed
-    if (i == n-1) {
-        if (op == '+') eq += second_num; //addition mode
-        else if (op == '-') eq -= second_num; //subtraction mode
-        else if (op == 'x') eq *= second_num ; //multiplication mode
-        else if (op == '/') {
-           //division mode
-          if (second_num == 0.0) {
-            printf("\nError: Division by zero\n");
-            
-          } else {
-            eq = (float) eq / (float) second_num;
-          }
+    // Find the operator position dynamically
+    for (int i = 0; i < n; i++) {
+        char s = equation[i];
+        if (s == '+' || s == '-' || s == 'x' || s == '/') {
+            op = s;
+            i_op = i;
+            break;
         }
     }
-  }
 
-  printf("\nAnswer: %.1f\n", eq);
-  return eq;
+    if (i_op == -1) return 0.0; // No operator found
+
+    float first_num = 0;
+    float second_num = 0;
+
+    // Build first number
+    for (int i = 0; i < i_op; i++) {
+        first_num = (first_num * 10) + (equation[i] - '0');
+    }
+
+    // Build second number
+    for (int i = i_op + 1; i < n; i++) {
+        //if (equation[i] >= '0' && equation[i] <= '9') {
+            second_num = (second_num * 10) + (equation[i] - '0');
+        //}
+    }
+
+    float result = 0;
+    if (op == '+') result = first_num + second_num;
+    else if (op == '-') result = first_num - second_num;
+    else if (op == 'x') result = first_num * second_num;
+    else if (op == '/') result = (second_num != 0) ? (first_num / second_num) : 0;
+
+    printf("\nCalc: %.1f %c %.1f = %.1f\n", first_num, op, second_num, result);
+    return result;
 }
+
+// int solve_equation(char* equation, int n) {
+//   int eq= 0;
+//   int mode = 0; //o add
+//   //1 sub
+//   //2 mult
+//   //3 div
+
+//   for (int i = 0; i < n; i ++ ) {
+//     char sym = equation[i];
+//     if (i < n/2 && n == 3) {
+//       eq += (sym - '0');
+//     } else if (i < n/2 && n > 3) {//numbers with more than 1 digit
+//       eq = eq * (10) + (sym - '0'); //multply old number by 10 to shift to tens and add new number in ones place
+//     } else if (i == n/2) {
+//       if (sym == '-') mode +=1; 
+//       else if (sym == 'x') mode += 2;
+//       else if (sym == '/') mode += 3;
+//     } else if (i > n/2) {
+      
+//       if (mode == 0) {eq = eq + (sym - '0');}
+//       else if (mode == 1) {eq = eq - (sym - '0');}
+//       else if (mode == 2) { eq = eq * (sym - '0') ;}
+//       else if (mode == 3) {eq = eq / (sym - '0'); }
+//     }
+//   }
+//   printf("\nAnswer: %d\n", eq);
+//   return eq;
+// }
 
 void adaptive_threshold(short* image) {
   // int total = IMAGE_HEIGHT * IMAGE_WIDTH;
@@ -665,14 +602,14 @@ long correlated_sad(short* image, const Template* tmpl, int j) {
           int ty = y + dy;
 
           int a = (image[y * NORM_SIZE + x] == 0x0000) ? 0 : 1;
-          int b = 0;
+          int b = tmpl[j].data[ty * NORM_SIZE + tx];
 
           if (tx >= 0 && tx < NORM_SIZE && ty >= 0 && ty < NORM_SIZE) {
             b = tmpl[j].data[ty * NORM_SIZE + tx];
           }
 
-          // int diff = a - b;
-          current_sad += (a - b < 0) ? (b - a) : (a - b);
+          // Use a squared difference or absolute difference
+          current_sad += (a != b) ? 1 : 0;
         }
       }
 
@@ -725,53 +662,104 @@ void draw_equals(int x, int y, int width, int thickness, short color) {
   }
 }
 
-void display_answer(int answer) {
-  clear_screen();
+void display_answer(float answer) {
+    clear_screen();  //clear CGA
+    char str[20];
+    sprintf(str, "%.1f", answer); // supports decimals like 3.14
 
-  char str[12];
-  sprintf(str, "%d", answer); // KEEP digits only
-  int len = strlen(str);
+    int len = strlen(str);
+    int scale = 4;  //how big each pixel becomes when drawn, each pixel is 4x4 block
+    int digit_size = NORM_SIZE * scale; //size of rach digit
 
-  int scale = 5;
-  int char_spacing = (NORM_SIZE * scale) + 5; 
+    int spacing = scale * 2;  // consistent spacing between characters
+    int gap = digit_size / 2;
 
-  // "=" size
-  int eq_width = (NORM_SIZE * scale) * 0.7;
-  int gap = 20;
+    int total_width = 0;
 
-  // total width INCLUDING "="
-  int total_width = eq_width + gap + (len * char_spacing);
-
-  int x_start = (IMAGE_WIDTH - total_width) / 2;
-  int y_start = (IMAGE_HEIGHT - (NORM_SIZE * scale)) / 2;
-  // DRAW "=" SIGN
-  int eq_x = x_start;
-  int eq_y = y_start + (NORM_SIZE * scale) / 2 - 10;
-  draw_equals(eq_x, eq_y, eq_width, 5, 0xFFFF);
-
-  // DRAW DIGITS
-  for (int i = 0; i < len; i++) {
-    char c = str[i];
-
-    int template_idx = -1;
-    for (int t = 0; t < MAX_TEMPLATES; t++) { // <-- make sure this is correct
-      if (template_arr[t].label == c) {
-        template_idx = t;
-        break;
+    for (int i = 0; i < len; i++) { //loop through each character
+      if (str[i] == '.') {
+        total_width += scale * 2;  // small width for decimal
+      } else {
+        total_width += digit_size; //normal digtis take full width
       }
+       if (i != len - 1) total_width += spacing;
     }
 
-    if (template_idx != -1) {
-      for (int y = 0; y < NORM_SIZE; y++) {
-        for (int x = 0; x < NORM_SIZE; x++) {
-          short color = (template_arr[template_idx].data[y * NORM_SIZE + x] == 0) ? 0x0000 : 0xFFFF;
-          for (int dy = 0; dy < scale; dy++) {
-            for (int dx = 0; dx < scale; dx++) {
-              plot_pixel(x_start + eq_width + gap + (i * char_spacing) + (x * scale) + dx, y_start + (y * scale) + dy, color);
-            }
-          }
+    int eq_width = digit_size;
+    int eq_height = digit_size / 6;
+
+    total_width += eq_width + gap;
+
+    int x_start = (IMAGE_WIDTH - total_width) / 2; //center vertically
+    int y_start = (IMAGE_HEIGHT - digit_size) / 2; //center horizontally
+
+    // To draw the equal sign
+    int eq_x = x_start;  //= start at left side of centered block
+    int eq_y = y_start + digit_size / 2 - eq_height;
+
+    draw_equals(eq_x, eq_y, eq_width, eq_height, 0xFFFF);
+
+    int current_x = x_start + eq_width + gap;
+
+    for (int i = 0; i < len; i++) { //draw eacha character
+      char c = str[i];
+      //Handle decimal point
+      if (c == '.') {
+        int dot_size = scale;
+
+        for (int dy = 0; dy < dot_size; dy++) {
+         for (int dx = 0; dx < dot_size; dx++) {
+           plot_pixel(current_x + dx, y_start + digit_size - (2 * scale) + dy, 0xFFFF);
+         }
+        }
+        current_x += (scale * 2) + spacing; //move to next character
+        continue;
+      }
+
+      int template_idx = -1;
+      for (int t = 0; t < MAX_TEMPLATES; t++) {
+        if (template_arr[t].label == c) { //match digit/character
+          template_idx = t;
+          break;
         }
       }
+
+        if (template_idx != -1) {
+            int min_x = NORM_SIZE, max_x = 0;
+            for (int y = 0; y < NORM_SIZE; y++) {
+                for (int x = 0; x < NORM_SIZE; x++) {
+                    if (template_arr[template_idx].data[y * NORM_SIZE + x] == 0) {
+                        if (x < min_x) min_x = x;
+                        if (x > max_x) max_x = x;
+                    }
+                }
+            }
+
+            int char_width = (max_x - min_x + 1);
+
+            // --- DRAW CHARACTER ---
+            for (int y = 0; y < NORM_SIZE; y++) {
+                for (int x = min_x; x <= max_x; x++) {
+
+                    short color =
+                        (template_arr[template_idx].data[y * NORM_SIZE + x] == 0)
+                        ? 0x0000 : 0xFFFF;
+
+                    for (int dy = 0; dy < scale; dy++) {
+                        for (int dx = 0; dx < scale; dx++) {
+
+                            plot_pixel(
+                                current_x + ((x - min_x) * scale) + dx,
+                                y_start + (y * scale) + dy,
+                                color
+                            );
+                        }
+                    }
+                }
+            }
+
+            // move forward using ACTUAL width (fixes spacing issues)
+            current_x += (char_width * scale) + spacing;
+        }
     }
-  }
 }
